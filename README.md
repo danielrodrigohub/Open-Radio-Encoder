@@ -15,8 +15,6 @@
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen?style=flat)](https://github.com/danielrodrigohub/Open-Radio-Encoder/pulls)
 
-![Open Radio Encoder UI](image_570828.png)
-
 </div>
 
 ---
