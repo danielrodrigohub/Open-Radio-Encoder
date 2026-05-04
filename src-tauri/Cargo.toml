@@ -1,0 +1,63 @@
+[package]
+name = "open-radio-encoder"
+version = "0.1.0"
+edition = "2021"
+description = "Open Radio Encoder - Lightweight multi-encoder for Icecast/Shoutcast streaming"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+
+# Audio capture
+cpal = "0.15"
+crossbeam-channel = "0.5"
+
+# DSP and audio processing
+rustfft = "6"
+realfft = "3"
+biquad = "0.4"
+
+# VST3 host
+vst3 = "0.1"
+
+# Encoding
+mp3lame-encoder = "0.3"
+opus = "0.3"
+vorbis-encoder = "0.16"
+flac-encoder = "0.4"
+hound = "3"        # WAV encoding
+
+# Streaming (Icecast/Shoutcast)
+reqwest = { version = "0.12", features = ["blocking", "stream"] }
+bytes = "1"
+
+# Remote control HTTP server
+tiny_http = "0.12"
+hyper = { version = "1", features = ["server", "http1"] }
+http-body-util = "0.1"
+
+# Email notifications
+lettre = { version = "0.11", features = ["smtp-transport", "tokio1-native-tls"] }
+
+# Misc
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+log = "0.4"
+env_logger = "0.11"
+thiserror = "2"
+anyhow = "1"
+parking_lot = "0.12"
+dasp = { version = "0.11", features = ["signal"] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true
