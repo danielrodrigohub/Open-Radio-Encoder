@@ -96,7 +96,7 @@ impl AudioEngine {
         // Spawn state emission loop (VU + station info → frontend at ~30fps)
         let engine_clone = engine.clone();
         let handle_clone = handle.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut rx = engine_clone.state_tx.subscribe();
             loop {
                 match rx.recv().await {
