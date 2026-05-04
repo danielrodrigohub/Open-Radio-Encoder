@@ -15,29 +15,16 @@ tokio = { version = "1", features = ["full"] }
 cpal = "0.15"
 crossbeam-channel = "0.5"
 
-# DSP and audio processing
-rustfft = "6"
-realfft = "3"
-biquad = "0.4"
-
-# VST3 host
-vst3 = "0.1"
-
 # Encoding
-mp3lame-encoder = "0.3"
-opus = "0.3"
-vorbis-encoder = "0.16"
-flac-encoder = "0.4"
+mp3lame-encoder = "0.2"
 hound = "3"        # WAV encoding
 
-# Streaming (Icecast/Shoutcast)
-reqwest = { version = "0.12", features = ["blocking", "stream"] }
+# Streaming & HTTP client
+reqwest = { version = "0.12", features = ["blocking", "stream", "json"] }
 bytes = "1"
 
 # Remote control HTTP server
 tiny_http = "0.12"
-hyper = { version = "1", features = ["server", "http1"] }
-http-body-util = "0.1"
 
 # Email notifications
 lettre = { version = "0.11", features = ["smtp-transport", "tokio1-native-tls"] }
@@ -50,7 +37,6 @@ env_logger = "0.11"
 thiserror = "2"
 anyhow = "1"
 parking_lot = "0.12"
-dasp = { version = "0.11", features = ["signal"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

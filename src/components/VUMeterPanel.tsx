@@ -71,31 +71,6 @@ function VUBar({ level, label }: { level: number; label: string }) {
   );
 }
 
-function VUMeterScale({ label }: { label: string }) {
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <span className="text-[10px] text-zinc-600 uppercase tracking-wider">
-        {label}
-      </span>
-      <div className="relative w-7 h-48">
-        {/* Scale markings */}
-        {[0, -6, -12, -18, -24, -30, -42, -54].map((db) => {
-          const y = dbToPercent(db);
-          return (
-            <div
-              key={db}
-              className="absolute left-0 right-0 flex items-center gap-0.5"
-              style={{ bottom: `${y}%` }}
-            >
-              <div className="flex-1 h-px bg-zinc-700" />
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 export default function VUMeterPanel({
   inputLevelL,
   inputLevelR,

@@ -1,6 +1,6 @@
 use parking_lot::Mutex;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::broadcast;
 
 use crate::audio::capture::AudioCapture;
@@ -9,7 +9,7 @@ use crate::audio::mixer::AudioMixer;
 use crate::audio::vu_meter::VuMeter;
 
 pub struct AudioEngine {
-    pub capture: Arc<Mutex<Option<AudioCapture>>>,
+    pub handle: AppHandle,
     pub mixer: Arc<Mutex<AudioMixer>>,
     pub encoder_manager: Arc<Mutex<EncoderManager>>,
     pub vu_meter: Arc<Mutex<VuMeter>>,
@@ -78,11 +78,11 @@ pub enum AudioCodec {
 }
 
 impl AudioEngine {
-    pub async fn new(handle: AppHandle) -> anyhow::Result<Arc<Self>> {
+    pub fn new(handle: AppHandle) -> anyhow::Result<()> {
         let (state_tx, _) = broadcast::channel::<EngineState>(256);
 
         let engine = Arc::new(Self {
-            capture: Arc::new(Mutex::new(None)),
+            handle: handle.clone(),
             mixer: Arc::new(Mutex::new(AudioMixer::new())),
             encoder_manager: Arc::new(Mutex::new(EncoderManager::new())),
             vu_meter: Arc::new(Mutex::new(VuMeter::new())),
@@ -93,7 +93,7 @@ impl AudioEngine {
             recording_active: Arc::new(Mutex::new(false)),
         });
 
-        // Spawn the state emission loop (sends VU + station info to frontend at ~30fps)
+        // Spawn state emission loop (VU + station info → frontend at ~30fps)
         let engine_clone = engine.clone();
         let handle_clone = handle.clone();
         tokio::spawn(async move {
@@ -111,25 +111,109 @@ impl AudioEngine {
             }
         });
 
-        log::info!("AudioEngine initialized");
-        Ok(engine)
+        handle.manage(engine.clone());
+
+        log::info!("AudioEngine initialized and managed");
+        Ok(())
     }
 
     pub fn broadcast_state(&self, state: EngineState) {
         let _ = self.state_tx.send(state);
     }
 
-    pub async fn start_capture(&self, device_name: Option<String>) -> anyhow::Result<()> {
-        let capture = AudioCapture::new(device_name)?;
-        let mut cap = self.capture.lock();
-        *cap = Some(capture);
-        *self.is_running.lock() = true;
-        Ok(())
-    }
+    pub fn build_state(&self) -> EngineState {
+        let vu = self.vu_meter.lock();
+        let (left, right) = vu.get_levels();
+        drop(vu);
 
-    pub async fn stop_capture(&self) {
-        let mut cap = self.capture.lock();
-        *cap = None;
-        *self.is_running.lock() = false;
+        let recording_size = if *self.recording_active.lock() {
+            0.0 // tracked elsewhere
+        } else {
+            0.0
+        };
+
+        EngineState {
+            input_level_left: left,
+            input_level_right: right,
+            output_level_left: left,
+            output_level_right: right,
+            stations: vec![],
+            current_song: "No metadata source configured".to_string(),
+            recording_size_mb: recording_size,
+            uptime_secs: 0,
+        }
     }
+}
+
+/// Spawns audio capture + processing loop in a dedicated OS thread.
+/// cpal::Stream is NOT Send, so we create and hold it entirely within this thread.
+pub fn spawn_capture_loop(
+    engine: Arc<AudioEngine>,
+    device_name: Option<String>,
+) -> anyhow::Result<()> {
+    let mixer = engine.mixer.clone();
+    let vu_meter = engine.vu_meter.clone();
+    let is_running = engine.is_running.clone();
+    let engine_for_thread = engine.clone();
+
+    std::thread::spawn(move || {
+        // Create capture stream inside this thread (Stream is !Send)
+        let capture = match AudioCapture::new(device_name) {
+            Ok(c) => c,
+            Err(e) => {
+                log::error!("Failed to create audio capture: {}", e);
+                *is_running.lock() = false;
+                return;
+            }
+        };
+
+        log::info!("Capture loop started");
+        *is_running.lock() = true;
+
+        loop {
+            if !*is_running.lock() {
+                break;
+            }
+
+            // Receive audio buffer from cpal callback
+            match capture.sample_rx.recv_timeout(std::time::Duration::from_millis(50)) {
+                Ok(mut buffer) => {
+                    // Process through DSP chain
+                    mixer.lock().process_buffer(&mut buffer, 2);
+
+                    // Update VU meter and broadcast to frontend
+                    let mut vu = vu_meter.lock();
+                    let (l, r) = vu.process(&buffer, 2);
+
+                    let mut s = engine_for_thread.build_state();
+                    s.input_level_left = l;
+                    s.input_level_right = r;
+                    s.output_level_left = l;
+                    s.output_level_right = r;
+                    engine_for_thread.broadcast_state(s);
+                }
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                    // No data, apply VU meter decay
+                    let mut vu = vu_meter.lock();
+                    let (l, r) = vu.process(&[], 2);
+                    drop(vu);
+                    let mut s = engine_for_thread.build_state();
+                    s.input_level_left = l;
+                    s.input_level_right = r;
+                    s.output_level_left = l;
+                    s.output_level_right = r;
+                    engine_for_thread.broadcast_state(s);
+                }
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                    log::warn!("Capture channel disconnected, stopping loop");
+                    break;
+                }
+            }
+        }
+
+        *is_running.lock() = false;
+        log::info!("Capture loop stopped");
+    });
+
+    Ok(())
 }

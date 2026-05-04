@@ -1,8 +1,6 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{BufferSize, SampleFormat, Stream, StreamConfig};
-use crossbeam_channel::{bounded, Receiver, Sender};
-use dasp::Signal;
-use std::sync::Arc;
+use cpal::{BufferSize, Stream, StreamConfig};
+use crossbeam_channel::{bounded, Receiver};
 
 const SAMPLE_RATE: u32 = 44100;
 const CHANNELS: u16 = 2;
@@ -31,9 +29,6 @@ impl AudioCapture {
 
         let actual_name = device.name()?;
         log::info!("Using input device: {}", actual_name);
-
-        let supported_config = device.default_input_config()?;
-        let sample_rate = supported_config.sample_rate().0;
 
         // Always use F32 for DSP processing
         let config: StreamConfig = StreamConfig {
@@ -71,7 +66,7 @@ impl AudioCapture {
             stream,
             sample_rx,
             device_name: actual_name,
-            sample_rate,
+            sample_rate: SAMPLE_RATE,
         })
     }
 

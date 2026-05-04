@@ -1,6 +1,5 @@
 pub mod commands;
 
-use std::io::Read;
 use std::sync::Arc;
 use parking_lot::Mutex;
 
@@ -17,7 +16,7 @@ impl RemoteServer {
         }
     }
 
-    pub async fn start(&self, smtp_config: Option<SmtpConfig>, webhook_urls: Vec<String>) -> anyhow::Result<()> {
+    pub async fn start(&self, _smtp_config: Option<SmtpConfig>, _webhook_urls: Vec<String>) -> anyhow::Result<()> {
         let running = self.running.clone();
         *running.lock() = true;
         let port = self.port;
@@ -36,7 +35,7 @@ impl RemoteServer {
             };
 
             while *running.lock() {
-                if let Some(request) = server.recv_timeout(std::time::Duration::from_secs(1)) {
+                if let Ok(Some(mut request)) = server.recv_timeout(std::time::Duration::from_secs(1)) {
                     let url = request.url().to_string();
                     let response = match url.as_str() {
                         "/api/start" => {

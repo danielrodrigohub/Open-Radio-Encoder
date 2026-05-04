@@ -27,9 +27,7 @@ pub fn run() {
         ])
         .setup(|app| {
             let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let _ = AudioEngine::new(handle).await;
-            });
+            AudioEngine::new(handle).expect("Failed to initialize audio engine");
             Ok(())
         })
         .run(tauri::generate_context!())

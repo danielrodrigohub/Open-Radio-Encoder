@@ -102,7 +102,7 @@ export default function App() {
   const [currentSong, setCurrentSong] = useState("No metadata source configured");
   const [recordingSize, setRecordingSize] = useState(0);
   const [uptime, setUptime] = useState(0);
-  const [inputDevice, setInputDevice] = useState("Default Input");
+  const [inputDevice] = useState("Default Input");
 
   // Listen for engine state updates from Rust backend
   useEffect(() => {
