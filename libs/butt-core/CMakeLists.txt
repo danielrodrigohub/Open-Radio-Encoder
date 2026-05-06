@@ -68,7 +68,7 @@ if(PORTAUDIO_FOUND)
 endif()
 
 if(LAME_FOUND)
-    target_link_libraries(butt-core PUBLIC PkgConfig::LAME)
+    target_link_libraries(butt-core PUBLIC LAME::lame)
     target_compile_definitions(butt-core PUBLIC HAVE_LAME)
 endif()
 

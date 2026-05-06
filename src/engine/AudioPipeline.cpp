@@ -145,8 +145,8 @@ void AudioPipeline::stop() {
 // ─────────────────────────────────────────────
 int AudioPipeline::paCallback(const void* input, void* /*output*/,
                                unsigned long frameCount,
-                               const void* /*timeInfo*/,
-                               unsigned long /*statusFlags*/,
+                               const PaStreamCallbackTimeInfo* /*timeInfo*/,
+                               PaStreamCallbackFlags /*statusFlags*/,
                                void* userData) {
     auto* self = static_cast<AudioPipeline*>(userData);
     const auto* pcmInput = static_cast<const float*>(input);

@@ -124,6 +124,8 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/JUCE/CMakeLists.txt")
         JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:OpenRadioEncoder,JUCE_VERSION>"
     )
 
+    juce_generate_juce_header(OpenRadioEncoder)
+
     target_link_libraries(OpenRadioEncoder PRIVATE
         butt-core
         juce::juce_audio_basics

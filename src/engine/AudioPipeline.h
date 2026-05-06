@@ -20,6 +20,13 @@
 #include <thread>
 #include <vector>
 
+#ifdef HAVE_PORTAUDIO
+#include <portaudio.h>
+#else
+struct PaStreamCallbackTimeInfo {};
+using PaStreamCallbackFlags = unsigned long;
+#endif
+
 namespace ore {
 
 class BroadcastDistributor;
@@ -88,8 +95,8 @@ private:
     /// PortAudio callback (static, called from real-time thread).
     static int paCallback(const void* input, void* output,
                           unsigned long frameCount,
-                          const void* timeInfo,
-                          unsigned long statusFlags,
+                          const PaStreamCallbackTimeInfo* timeInfo,
+                          PaStreamCallbackFlags statusFlags,
                           void* userData);
 
     /// Mixer thread function.
