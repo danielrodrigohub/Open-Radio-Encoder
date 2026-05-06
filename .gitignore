@@ -1,25 +1,33 @@
-# Dependencies
-node_modules/
+# Build
+build/
+cmake-build-*/
+out/
 
-# Build output
-dist/
-src-tauri/target/
+# JUCE
+JUCE/
 
 # IDE
-.vscode/
 .idea/
-*.swp
-*.swo
-*~
+.vscode/
+*.xcodeproj/
+*.xcworkspace/
+*.sln
+*.vcxproj*
+
+# Compiled
+*.o
+*.a
+*.dylib
+*.so
+*.dll
+*.exe
+*.app
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Env
-.env
-.env.local
-.env.*.local
-
-# Logs
-*.log
+# Temp
+*.swp
+*.swo
+*~
