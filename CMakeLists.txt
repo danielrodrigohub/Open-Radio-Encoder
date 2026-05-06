@@ -25,7 +25,17 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(PORTAUDIO portaudio-2.0)
 
 # Encoders
-pkg_check_modules(LAME IMPORTED_TARGET lame)
+find_library(LAME_LIBRARY NAMES mp3lame)
+find_path(LAME_INCLUDE_DIR NAMES lame/lame.h)
+if(LAME_LIBRARY AND LAME_INCLUDE_DIR)
+    add_library(LAME::lame UNKNOWN IMPORTED)
+    set_target_properties(LAME::lame PROPERTIES
+        IMPORTED_LOCATION "${LAME_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${LAME_INCLUDE_DIR}"
+    )
+    set(LAME_FOUND TRUE)
+endif()
+
 pkg_check_modules(TWOLAME IMPORTED_TARGET twolame)
 pkg_check_modules(OPUS IMPORTED_TARGET opus)
 pkg_check_modules(VORBIS IMPORTED_TARGET vorbis vorbisenc)
@@ -34,7 +44,16 @@ pkg_check_modules(FDK_AAC IMPORTED_TARGET fdk-aac)
 pkg_check_modules(SAMPLERATE IMPORTED_TARGET samplerate)
 
 # Streaming
-pkg_check_modules(SHOUT IMPORTED_TARGET shout)
+find_library(SHOUT_LIBRARY NAMES shout)
+find_path(SHOUT_INCLUDE_DIR NAMES shout/shout.h)
+if(SHOUT_LIBRARY AND SHOUT_INCLUDE_DIR)
+    add_library(SHOUT::shout UNKNOWN IMPORTED)
+    set_target_properties(SHOUT::shout PROPERTIES
+        IMPORTED_LOCATION "${SHOUT_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${SHOUT_INCLUDE_DIR}"
+    )
+    set(SHOUT_FOUND TRUE)
+endif()
 
 # TLS
 find_package(OpenSSL)

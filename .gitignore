@@ -3,9 +3,6 @@ build/
 cmake-build-*/
 out/
 
-# JUCE
-JUCE/
-
 # IDE
 .idea/
 .vscode/
