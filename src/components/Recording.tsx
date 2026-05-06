@@ -1,9 +1,37 @@
+import { save } from "@tauri-apps/plugin-dialog";
+
 interface RecordingProps {
   sizeMB: number;
+  isRecording: boolean;
+  format: string;
+  onStartRecording: (path: string) => void;
+  onStopRecording: () => void;
 }
 
-export default function Recording({ sizeMB }: RecordingProps) {
-  const isRecording = sizeMB > 0;
+export default function Recording({
+  sizeMB,
+  isRecording,
+  format,
+  onStartRecording,
+  onStopRecording,
+}: RecordingProps) {
+  const handleClick = async () => {
+    if (isRecording) {
+      onStopRecording();
+    } else {
+      const path = await save({
+        title: "Save Recording",
+        defaultPath: "recording.wav",
+        filters: [
+          { name: "WAV Audio", extensions: ["wav"] },
+          { name: "All Files", extensions: ["*"] },
+        ],
+      });
+      if (path) {
+        onStartRecording(path);
+      }
+    }
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -27,9 +55,10 @@ export default function Recording({ sizeMB }: RecordingProps) {
         </div>
         <div className="flex items-center justify-between">
           <span className="text-[10px] text-zinc-500">Format</span>
-          <span className="text-[10px] text-zinc-400">WAV (16-bit PCM)</span>
+          <span className="text-[10px] text-zinc-400">{format}</span>
         </div>
         <button
+          onClick={handleClick}
           className={`mt-1 w-full px-2 py-1 rounded text-[11px] font-medium transition-colors ${
             isRecording
               ? "bg-red-900/50 hover:bg-red-900/80 text-red-400 border border-red-800/50"

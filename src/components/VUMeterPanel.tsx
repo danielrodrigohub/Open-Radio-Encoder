@@ -80,10 +80,13 @@ export default function VUMeterPanel({
   return (
     <div className="flex-1 flex flex-col">
       {/* Section header */}
-      <div className="px-4 pt-3 pb-1">
+      <div className="px-4 pt-3 pb-1 flex items-center justify-between">
         <h3 className="text-zinc-400 text-[11px] uppercase tracking-wider font-semibold">
           Audio Levels
         </h3>
+        <span className="text-[9px] text-zinc-600 font-mono tabular-nums hidden">
+          in=({inputLevelL.toFixed(1)},{inputLevelR.toFixed(1)}) out=({outputLevelL.toFixed(1)},{outputLevelR.toFixed(1)})
+        </span>
       </div>
 
       {/* VU Meters row */}

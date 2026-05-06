@@ -3,7 +3,6 @@ pub struct VuMeter {
     right_peak: f32,
     left_rms: f32,
     right_rms: f32,
-    decay_rate: f32, // Peak hold decay per frame
     peak_hold_counter: u32,
     peak_hold_duration: u32,
 }
@@ -15,7 +14,6 @@ impl VuMeter {
             right_peak: -54.0,
             left_rms: -54.0,
             right_rms: -54.0,
-            decay_rate: 0.95,
             peak_hold_counter: 0,
             peak_hold_duration: 30, // ~1 second at 30fps
         }
@@ -82,11 +80,9 @@ impl VuMeter {
     }
 
     fn apply_decay(&mut self) {
-        self.left_peak = self.left_peak * self.decay_rate;
-        self.right_peak = self.right_peak * self.decay_rate;
-        // Floor at -54 dB
-        self.left_peak = self.left_peak.max(-54.0);
-        self.right_peak = self.right_peak.max(-54.0);
+        // Decay 0.5dB per frame (subtraction, correct for negative dBFS)
+        self.left_peak = (self.left_peak - 0.5).max(-54.0);
+        self.right_peak = (self.right_peak - 0.5).max(-54.0);
     }
 
     pub fn get_levels(&self) -> (f32, f32) {

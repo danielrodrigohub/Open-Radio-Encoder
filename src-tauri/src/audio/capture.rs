@@ -1,16 +1,13 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{BufferSize, Stream, StreamConfig};
+use cpal::{BufferSize, SampleFormat, Stream, StreamConfig};
 use crossbeam_channel::{bounded, Receiver};
-
-const SAMPLE_RATE: u32 = 44100;
-const CHANNELS: u16 = 2;
-const BUFFER_FRAMES: u32 = 1024;
 
 pub struct AudioCapture {
     pub stream: Stream,
     pub sample_rx: Receiver<Vec<f32>>,
     pub device_name: String,
     pub sample_rate: u32,
+    pub channels: u16,
 }
 
 impl AudioCapture {
@@ -28,23 +25,29 @@ impl AudioCapture {
         };
 
         let actual_name = device.name()?;
-        log::info!("Using input device: {}", actual_name);
+        let supported = device.default_input_config()?;
+        let channels = supported.channels();
+        let sample_rate = supported.sample_rate().0;
+        let sample_format = supported.sample_format();
 
-        // Always use F32 for DSP processing
+        log::info!(
+            "Using input device: {} ({} ch, {} Hz, {:?})",
+            actual_name, channels, sample_rate, sample_format
+        );
+
+        // Use device's native channels and sample rate, always request F32
         let config: StreamConfig = StreamConfig {
-            channels: CHANNELS,
-            sample_rate: cpal::SampleRate(SAMPLE_RATE),
-            buffer_size: BufferSize::Fixed(BUFFER_FRAMES),
+            channels,
+            sample_rate: cpal::SampleRate(sample_rate),
+            buffer_size: BufferSize::Default,
         };
 
-        let (sample_tx, sample_rx) = bounded::<Vec<f32>>(8); // 8-buffer ring
+        let (sample_tx, sample_rx) = bounded::<Vec<f32>>(8);
 
         let stream = device.build_input_stream(
             &config,
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                // Copy audio data to avoid holding the callback
                 let buffer = data.to_vec();
-                // Non-blocking send; drop if consumer is behind
                 let _ = sample_tx.try_send(buffer);
             },
             |err| {
@@ -55,18 +58,14 @@ impl AudioCapture {
 
         stream.play()?;
 
-        log::info!(
-            "Audio capture started: {} Hz, {} channels, {} frames buffer",
-            SAMPLE_RATE,
-            CHANNELS,
-            BUFFER_FRAMES
-        );
+        log::info!("Audio capture started: {} Hz, {} ch", sample_rate, channels);
 
         Ok(Self {
             stream,
             sample_rx,
             device_name: actual_name,
-            sample_rate: SAMPLE_RATE,
+            sample_rate,
+            channels,
         })
     }
 

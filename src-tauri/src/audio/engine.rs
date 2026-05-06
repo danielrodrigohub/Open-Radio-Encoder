@@ -14,10 +14,13 @@ pub struct AudioEngine {
     pub encoder_manager: Arc<Mutex<EncoderManager>>,
     pub vu_meter: Arc<Mutex<VuMeter>>,
     pub is_running: Arc<Mutex<bool>>,
+    pub capture_generation: Arc<Mutex<u64>>,
     pub state_tx: broadcast::Sender<EngineState>,
     pub metadata_source: Arc<Mutex<MetadataSource>>,
     pub recording_path: Arc<Mutex<Option<String>>>,
     pub recording_active: Arc<Mutex<bool>>,
+    pub stations: Arc<Mutex<Vec<StationInfo>>>,
+    pub recording_size_bytes: Arc<Mutex<u64>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -87,10 +90,13 @@ impl AudioEngine {
             encoder_manager: Arc::new(Mutex::new(EncoderManager::new())),
             vu_meter: Arc::new(Mutex::new(VuMeter::new())),
             is_running: Arc::new(Mutex::new(false)),
+            capture_generation: Arc::new(Mutex::new(0)),
             state_tx,
             metadata_source: Arc::new(Mutex::new(MetadataSource::None)),
             recording_path: Arc::new(Mutex::new(None)),
             recording_active: Arc::new(Mutex::new(false)),
+            stations: Arc::new(Mutex::new(Vec::new())),
+            recording_size_bytes: Arc::new(Mutex::new(0)),
         });
 
         // Spawn state emission loop (VU + station info → frontend at ~30fps)
@@ -126,22 +132,53 @@ impl AudioEngine {
         let (left, right) = vu.get_levels();
         drop(vu);
 
-        let recording_size = if *self.recording_active.lock() {
-            0.0 // tracked elsewhere
-        } else {
-            0.0
-        };
+        let recording_size = *self.recording_size_bytes.lock() as f64 / (1024.0 * 1024.0);
+
+        let mut stations = self.stations.lock().clone();
+        {
+            let em = self.encoder_manager.lock();
+            for s in stations.iter_mut() {
+                if let Some((active, listeners, stream_time)) = em.get_encoder_state(&s.id) {
+                    s.connected = active;
+                    s.listeners = listeners;
+                    s.stream_time_secs = stream_time;
+                }
+            }
+        }
 
         EngineState {
             input_level_left: left,
             input_level_right: right,
             output_level_left: left,
             output_level_right: right,
-            stations: vec![],
+            stations,
             current_song: "No metadata source configured".to_string(),
             recording_size_mb: recording_size,
             uptime_secs: 0,
         }
+    }
+
+    pub fn add_station(&self, station: StationInfo) -> anyhow::Result<()> {
+        self.encoder_manager.lock().add_station(station.clone());
+        self.stations.lock().push(station);
+        Ok(())
+    }
+
+    pub fn update_station(&self, id: &str, updated: StationInfo) -> anyhow::Result<()> {
+        let mut stations = self.stations.lock();
+        if let Some(s) = stations.iter_mut().find(|s| s.id == id) {
+            *s = updated.clone();
+        }
+        drop(stations);
+        self.encoder_manager.lock().remove_station(id);
+        self.encoder_manager.lock().add_station(updated);
+        Ok(())
+    }
+
+    pub fn remove_station(&self, id: &str) -> anyhow::Result<()> {
+        self.encoder_manager.lock().remove_station(id);
+        self.stations.lock().retain(|s| s.id != id);
+        Ok(())
     }
 }
 
@@ -154,7 +191,14 @@ pub fn spawn_capture_loop(
     let mixer = engine.mixer.clone();
     let vu_meter = engine.vu_meter.clone();
     let is_running = engine.is_running.clone();
+    let capture_generation = engine.capture_generation.clone();
     let engine_for_thread = engine.clone();
+
+    let generation = {
+        let mut gen = capture_generation.lock();
+        *gen += 1;
+        *gen
+    };
 
     std::thread::spawn(move || {
         // Create capture stream inside this thread (Stream is !Send)
@@ -162,46 +206,51 @@ pub fn spawn_capture_loop(
             Ok(c) => c,
             Err(e) => {
                 log::error!("Failed to create audio capture: {}", e);
-                *is_running.lock() = false;
+                let gen = capture_generation.lock();
+                if *gen == generation {
+                    *is_running.lock() = false;
+                }
                 return;
             }
         };
 
-        log::info!("Capture loop started");
+        log::info!("Capture loop started (gen {})", generation);
         *is_running.lock() = true;
+        let mut frame_count: u64 = 0;
+        let ch = capture.channels;
 
         loop {
-            if !*is_running.lock() {
+            if *capture_generation.lock() != generation {
                 break;
             }
 
-            // Receive audio buffer from cpal callback
             match capture.sample_rx.recv_timeout(std::time::Duration::from_millis(50)) {
                 Ok(mut buffer) => {
-                    // Process through DSP chain
-                    mixer.lock().process_buffer(&mut buffer, 2);
+                    frame_count += 1;
+                    mixer.lock().process_buffer(&mut buffer, ch as usize);
 
-                    // Update VU meter and broadcast to frontend
                     let mut vu = vu_meter.lock();
-                    let (l, r) = vu.process(&buffer, 2);
+                    let (l, r) = vu.process(&buffer, ch as usize);
+                    drop(vu);
 
                     let mut s = engine_for_thread.build_state();
                     s.input_level_left = l;
                     s.input_level_right = r;
                     s.output_level_left = l;
                     s.output_level_right = r;
+                    s.current_song = format!("frame={} ch={} L={:.1} R={:.1}", frame_count, ch, l, r);
                     engine_for_thread.broadcast_state(s);
                 }
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                    // No data, apply VU meter decay
                     let mut vu = vu_meter.lock();
-                    let (l, r) = vu.process(&[], 2);
+                    let (l, r) = vu.process(&[], ch as usize);
                     drop(vu);
                     let mut s = engine_for_thread.build_state();
                     s.input_level_left = l;
                     s.input_level_right = r;
                     s.output_level_left = l;
                     s.output_level_right = r;
+                    s.current_song = format!("timeout L={:.1} R={:.1}", l, r);
                     engine_for_thread.broadcast_state(s);
                 }
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
@@ -211,8 +260,14 @@ pub fn spawn_capture_loop(
             }
         }
 
-        *is_running.lock() = false;
-        log::info!("Capture loop stopped");
+        // Only set is_running to false if we are still the latest generation
+        let gen = capture_generation.lock();
+        if *gen == generation {
+            *is_running.lock() = false;
+            log::info!("Capture loop stopped (gen {})", generation);
+        } else {
+            log::info!("Capture loop superseded (gen {})", generation);
+        }
     });
 
     Ok(())

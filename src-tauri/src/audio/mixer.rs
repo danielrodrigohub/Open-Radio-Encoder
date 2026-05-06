@@ -213,27 +213,68 @@ impl Limiter {
 
 /// Complete audio signal chain: EQ → Compressor → Limiter
 pub struct AudioMixer {
-    pub equalizer: Equalizer,
-    pub compressor: Compressor,
-    pub limiter: Limiter,
+    pub equalizer_l: Equalizer,
+    pub equalizer_r: Equalizer,
+    pub compressor_l: Compressor,
+    pub compressor_r: Compressor,
+    pub limiter_l: Limiter,
+    pub limiter_r: Limiter,
 }
 
 impl AudioMixer {
     pub fn new() -> Self {
+        let sample_rate = 44100;
         Self {
-            equalizer: Equalizer::new(44100),
-            compressor: Compressor::new(44100),
-            limiter: Limiter::new(44100),
+            equalizer_l: Equalizer::new(sample_rate),
+            equalizer_r: Equalizer::new(sample_rate),
+            compressor_l: Compressor::new(sample_rate),
+            compressor_r: Compressor::new(sample_rate),
+            limiter_l: Limiter::new(sample_rate),
+            limiter_r: Limiter::new(sample_rate),
         }
     }
 
     /// Process a full stereo interleaved buffer through the DSP chain
-    pub fn process_buffer(&mut self, buffer: &mut [f32], _channels: usize) {
+    pub fn process_buffer(&mut self, buffer: &mut [f32], channels: usize) {
+        // Sanitize input: replace NaNs/Infs with 0.0
         for sample in buffer.iter_mut() {
-            let s = self.equalizer.process_sample(*sample);
-            let s = self.compressor.process_sample(s);
-            let s = self.limiter.process_sample(s);
-            *sample = s.clamp(-1.0, 1.0);
+            if !sample.is_finite() {
+                *sample = 0.0;
+            }
+        }
+
+        if channels == 1 {
+            for sample in buffer.iter_mut() {
+                let s = self.equalizer_l.process_sample(*sample);
+                let s = self.compressor_l.process_sample(s);
+                let s = self.limiter_l.process_sample(s);
+                *sample = s.clamp(-1.0, 1.0);
+            }
+        } else if channels == 2 {
+            for i in (0..buffer.len()).step_by(2) {
+                if i + 1 < buffer.len() {
+                    // Left channel
+                    let mut l = buffer[i];
+                    l = self.equalizer_l.process_sample(l);
+                    l = self.compressor_l.process_sample(l);
+                    l = self.limiter_l.process_sample(l);
+                    buffer[i] = l.clamp(-1.0, 1.0);
+
+                    // Right channel
+                    let mut r = buffer[i + 1];
+                    r = self.equalizer_r.process_sample(r);
+                    r = self.compressor_r.process_sample(r);
+                    r = self.limiter_r.process_sample(r);
+                    buffer[i + 1] = r.clamp(-1.0, 1.0);
+                }
+            }
+        }
+
+        // Sanitize output just in case filters produced invalid values
+        for sample in buffer.iter_mut() {
+            if !sample.is_finite() {
+                *sample = 0.0;
+            }
         }
     }
 }

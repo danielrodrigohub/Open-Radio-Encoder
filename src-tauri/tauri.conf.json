@@ -1,5 +1,4 @@
 {
-  "$schema": "https://raw.githubusercontent.com/nicoverbruggen/tauri-v2-schema/main/tauri.conf.json",
   "productName": "Open Radio Encoder",
   "version": "0.1.0",
   "identifier": "com.openradio.encoder",

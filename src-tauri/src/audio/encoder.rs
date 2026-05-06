@@ -39,6 +39,13 @@ impl EncoderManager {
         }
     }
 
+    pub fn get_encoder_state(&self, id: &str) -> Option<(bool, u32, u64)> {
+        self.encoders.get(id).map(|enc| {
+            let e = enc.lock();
+            (e.active, e.station.listeners, e.station.stream_time_secs)
+        })
+    }
+
     pub fn add_station(&mut self, station: StationInfo) {
         let encoder = StreamEncoder {
             station: station.clone(),
