@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="img_obe.png" alt="Open Radio Encoder" width="400"/>
-</p>
-
 <h1 align="center">Open Radio Encoder</h1>
 
 <p align="center">
