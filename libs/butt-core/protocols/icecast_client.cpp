@@ -2,21 +2,33 @@
 // Open Radio Encoder — Icecast Client Implementation
 // ═══════════════════════════════════════════════════════════════════════
 #include "icecast_client.h"
-#include <shout/shout.h>
 #include <iostream>
+
+#ifdef HAVE_SHOUT
+#include <shout/shout.h>
+#endif
 
 namespace ore {
 
 IcecastClient::IcecastClient() {
+#ifdef HAVE_SHOUT
     shout_init();
+#endif
 }
 
 IcecastClient::~IcecastClient() {
     disconnect();
+#ifdef HAVE_SHOUT
     shout_shutdown();
+#endif
 }
 
 int IcecastClient::connect(const IcecastConfig& cfg) {
+#ifndef HAVE_SHOUT
+    (void)cfg;
+    std::cerr << "[IcecastClient] Built without libshout support" << std::endl;
+    return -1;
+#else
     disconnect();
 
     shout_ = shout_new();
@@ -74,9 +86,15 @@ int IcecastClient::connect(const IcecastConfig& cfg) {
         shout_ = nullptr;
         return -1;
     }
+#endif
 }
 
 int IcecastClient::send(const uint8_t* data, int len) {
+#ifndef HAVE_SHOUT
+    (void)data;
+    (void)len;
+    return -1;
+#else
     if (!isConnected_ || !shout_) return -1;
 
     int ret = shout_send(shout_, data, len);
@@ -87,9 +105,14 @@ int IcecastClient::send(const uint8_t* data, int len) {
     
     shout_sync(shout_);
     return len;
+#endif
 }
 
 int IcecastClient::updateSong(const std::string& song) {
+#ifndef HAVE_SHOUT
+    (void)song;
+    return -1;
+#else
     if (!isConnected_ || !shout_) return -1;
     
     shout_metadata_t* meta = shout_metadata_new();
@@ -104,6 +127,7 @@ int IcecastClient::updateSong(const std::string& song) {
     }
 
     return 0;
+#endif
 }
 
 int IcecastClient::getListenerCount() {
@@ -113,6 +137,7 @@ int IcecastClient::getListenerCount() {
 }
 
 void IcecastClient::disconnect() {
+#ifdef HAVE_SHOUT
     if (isConnected_ && shout_) {
         shout_close(shout_);
         shout_free(shout_);
@@ -120,6 +145,10 @@ void IcecastClient::disconnect() {
         isConnected_ = false;
         std::cout << "[IcecastClient] Disconnected" << std::endl;
     }
+#else
+    isConnected_ = false;
+    shout_ = nullptr;
+#endif
 }
 
 } // namespace ore

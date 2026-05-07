@@ -3,6 +3,7 @@
 // Implementation using libshout
 // ═══════════════════════════════════════════════════════════════════════
 #pragma once
+#include <cstdint>
 #include <string>
 
 // Forward declare shout_t from libshout
