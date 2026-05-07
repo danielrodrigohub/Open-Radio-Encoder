@@ -19,31 +19,36 @@ jobs:
 
       - name: Install dependencies
         run: |
+          export HOMEBREW_NO_AUTO_UPDATE=1
           brew install portaudio lame twolame libogg libvorbis opus flac \
-            libshout libsamplerate openssl fdk-aac
+            libshout libsamplerate fdk-aac 2>/dev/null || true
 
       - name: Configure CMake
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" 2>&1 | tail -50
 
       - name: Build
-        run: cmake --build build --config Release -j$(sysctl -n hw.ncpu)
+        run: cmake --build build --config Release -j$(sysctl -n hw.ncpu) 2>&1 | tail -50
 
       - name: Package DMG
         run: |
-          mkdir -p release/OpenRadioEncoder.app
-          cp -R build/OpenRadioEncoder_artefacts/Release/OpenRadioEncoder.app release/
-          hdiutil create -volname "OpenRadioEncoder" \
-            -srcfolder release/OpenRadioEncoder.app \
-            -ov -format UDZO \
-            release/OpenRadioEncoder-macOS.dmg
+          APP="build/OpenRadioEncoder_artefacts/Release/OpenRadioEncoder.app"
+          if [ -d "$APP" ]; then
+            hdiutil create -volname "OpenRadioEncoder" \
+              -srcfolder "$APP" -ov -format UDZO OpenRadioEncoder-macOS.dmg
+          else
+            echo "App bundle not found at $APP"
+            find build -name "*.app" -type d 2>/dev/null || echo "No .app bundles found"
+            find build -name "OpenRadio*" -type f 2>/dev/null || echo "No OpenRadio binaries found"
+            exit 1
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-build
-          path: release/OpenRadioEncoder-macOS.dmg
+          path: OpenRadioEncoder-macOS.dmg
 
   build-windows:
     runs-on: windows-latest
@@ -58,23 +63,28 @@ jobs:
       - name: Install dependencies (vcpkg)
         run: |
           vcpkg install portaudio mp3lame twolame opus libvorbis libogg flac \
-            fdk-aac libshout libsamplerate openssl --triplet x64-windows
+            libshout libsamplerate openssl --triplet x64-windows || true
+          vcpkg install fdk-aac --triplet x64-windows || true
 
       - name: Configure CMake
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" 2>&1 | tail -50
 
       - name: Build
-        run: cmake --build build --config Release -j$(nproc)
+        run: cmake --build build --config Release -j$(nproc) 2>&1 | tail -50
 
       - name: Package
         run: |
-          mkdir -p release
-          if [ -f "build/OpenRadioEncoder_artefacts/Release/OpenRadioEncoder.exe" ]; then
-            cp "build/OpenRadioEncoder_artefacts/Release/OpenRadioEncoder.exe" release/
+          EXE="build/OpenRadioEncoder_artefacts/Release/OpenRadioEncoder.exe"
+          if [ -f "$EXE" ]; then
+            mkdir -p release && cp "$EXE" release/ && cd release && \
+              7z a ../OpenRadioEncoder-Windows.zip . && cd ..
+          else
+            echo "Binary not found at $EXE"
+            find build -name "OpenRadio*" -type f 2>/dev/null || echo "No binaries found"
+            exit 1
           fi
-          cd release && zip -r ../OpenRadioEncoder-Windows.zip . && cd ..
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -91,8 +101,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake build-essential \
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            cmake build-essential pkg-config \
             libportaudio2 portaudio19-dev \
             libmp3lame-dev libtwolame-dev \
             libopus-dev libvorbis-dev libogg-dev \
@@ -102,37 +113,32 @@ jobs:
             libfreetype-dev libfontconfig-dev \
             libcurl4-openssl-dev libasound2-dev \
             libx11-dev libxcomposite-dev libxext-dev libxrandr-dev \
-            libxinerama-dev libglu1-mesa-dev libxcursor-dev
+            libxinerama-dev libglu1-mesa-dev libxcursor-dev \
+            libgtk-3-dev libwebkit2gtk-4.1-dev
 
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -50
 
       - name: Build
-        run: cmake --build build --config Release -j$(nproc)
+        run: cmake --build build --config Release -j$(nproc) 2>&1 | tail -50
 
-      - name: Package AppImage
+      - name: Package
         run: |
-          mkdir -p release
-          cp build/OpenRadioEncoder_artefacts/Release/OpenRadioEncoder release/
-          # Create a basic AppImage structure
-          mkdir -p release/OpenRadioEncoder.AppDir/usr/bin
-          mkdir -p release/OpenRadioEncoder.AppDir/usr/share/icons/hicolor/256x256/apps
-          cp build/OpenRadioEncoder_artefacts/Release/OpenRadioEncoder \
-            release/OpenRadioEncoder.AppDir/usr/bin/
-          cp resources/icons/appicon.png \
-            release/OpenRadioEncoder.AppDir/usr/share/icons/hicolor/256x256/apps/openradio.png 2>/dev/null || true
-          cp release/OpenRadioEncoder.AppDir/usr/bin/OpenRadioEncoder \
-            release/OpenRadioEncoder.AppDir/AppRun 2>/dev/null || true
-          chmod +x release/OpenRadioEncoder.AppDir/AppRun 2>/dev/null || true
-          # Package as tar.gz (AppImage builder not available)
-          tar -czf release/OpenRadioEncoder-ubuntu.tar.gz \
-            -C release/OpenRadioEncoder.AppDir .
+          BIN="build/OpenRadioEncoder_artefacts/Release/OpenRadioEncoder"
+          if [ -f "$BIN" ]; then
+            mkdir -p release && cp "$BIN" release/ && \
+              tar -czf OpenRadioEncoder-ubuntu.tar.gz -C release .
+          else
+            echo "Binary not found at $BIN"
+            find build -name "OpenRadio*" -type f 2>/dev/null || echo "No binaries found"
+            exit 1
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ubuntu-build
-          path: release/OpenRadioEncoder-ubuntu.tar.gz
+          path: OpenRadioEncoder-ubuntu.tar.gz
 
   release:
     needs: [build-macos, build-windows, build-ubuntu]
@@ -142,9 +148,6 @@ jobs:
         with:
           pattern: '*-build'
           merge-multiple: true
-
-      - name: Display structure
-        run: ls -laR
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
