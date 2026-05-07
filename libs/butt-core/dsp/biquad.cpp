@@ -20,12 +20,13 @@ void Biquad::setBiquad(int t, double f, double q, double g) {
 }
 
 void Biquad::calcBiquad() {
+    constexpr double kPi = 3.14159265358979323846;
     if (Fc_ <= 0.0 || sampleRate_ <= 0.0) {
         a0_ = 1; a1_ = 0; a2_ = 0; b1_ = 0; b2_ = 0;
         return;
     }
 
-    double w0 = 2.0 * M_PI * Fc_ / sampleRate_;
+    double w0 = 2.0 * kPi * Fc_ / sampleRate_;
     double sin_w0 = std::sin(w0);
     double cos_w0 = std::cos(w0);
     double alpha = sin_w0 / (2.0 * Q_);

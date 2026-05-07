@@ -2,21 +2,33 @@
 // Open Radio Encoder — Shoutcast Client Implementation
 // ═══════════════════════════════════════════════════════════════════════
 #include "shoutcast_client.h"
-#include <shout/shout.h>
 #include <iostream>
+
+#ifdef HAVE_SHOUT
+#include <shout/shout.h>
+#endif
 
 namespace ore {
 
 ShoutcastClient::ShoutcastClient() {
+#ifdef HAVE_SHOUT
     shout_init();
+#endif
 }
 
 ShoutcastClient::~ShoutcastClient() {
     disconnect();
+#ifdef HAVE_SHOUT
     shout_shutdown();
+#endif
 }
 
 int ShoutcastClient::connect(const ShoutcastConfig& cfg) {
+#ifndef HAVE_SHOUT
+    (void)cfg;
+    std::cerr << "[ShoutcastClient] Built without libshout support" << std::endl;
+    return -1;
+#else
     disconnect();
 
     shout_ = shout_new();
@@ -70,9 +82,15 @@ int ShoutcastClient::connect(const ShoutcastConfig& cfg) {
         shout_ = nullptr;
         return -1;
     }
+#endif
 }
 
 int ShoutcastClient::send(const uint8_t* data, int len) {
+#ifndef HAVE_SHOUT
+    (void)data;
+    (void)len;
+    return -1;
+#else
     if (!isConnected_ || !shout_) return -1;
 
     int ret = shout_send(shout_, data, len);
@@ -83,9 +101,14 @@ int ShoutcastClient::send(const uint8_t* data, int len) {
     
     shout_sync(shout_);
     return len;
+#endif
 }
 
 int ShoutcastClient::updateSong(const std::string& song) {
+#ifndef HAVE_SHOUT
+    (void)song;
+    return -1;
+#else
     if (!isConnected_ || !shout_) return -1;
     
     shout_metadata_t* meta = shout_metadata_new();
@@ -98,6 +121,7 @@ int ShoutcastClient::updateSong(const std::string& song) {
         return -1;
     }
     return 0;
+#endif
 }
 
 int ShoutcastClient::getListenerCount() {
@@ -106,13 +130,15 @@ int ShoutcastClient::getListenerCount() {
 }
 
 void ShoutcastClient::disconnect() {
+#ifdef HAVE_SHOUT
     if (isConnected_ && shout_) {
         shout_close(shout_);
         shout_free(shout_);
-        shout_ = nullptr;
-        isConnected_ = false;
         std::cout << "[ShoutcastClient] Disconnected" << std::endl;
     }
+#endif
+    shout_ = nullptr;
+    isConnected_ = false;
 }
 
 } // namespace ore

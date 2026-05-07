@@ -50,6 +50,7 @@ int VorbisEncoder::init(const EncoderConfig& config) {
 #endif
 }
 
+#ifdef HAVE_VORBIS
 int VorbisEncoder::writePage(uint8_t* enc_out, int max_out_bytes, bool flush) {
     int totalBytes = 0;
     ogg_page og;
@@ -63,6 +64,7 @@ int VorbisEncoder::writePage(uint8_t* enc_out, int max_out_bytes, bool flush) {
     }
     return totalBytes;
 }
+#endif
 
 int VorbisEncoder::encode(const float* pcm_in, int num_samples,
                            uint8_t* enc_out, int max_out_bytes) {
