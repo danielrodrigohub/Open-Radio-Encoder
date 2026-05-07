@@ -62,7 +62,7 @@ jobs:
 
       - name: Install dependencies (vcpkg)
         run: |
-          vcpkg install portaudio mp3lame twolame opus libvorbis libogg flac \
+          vcpkg install pkgconf portaudio mp3lame twolame opus libvorbis libogg flac \
             libshout libsamplerate openssl --triplet x64-windows || true
           vcpkg install fdk-aac --triplet x64-windows || true
 
