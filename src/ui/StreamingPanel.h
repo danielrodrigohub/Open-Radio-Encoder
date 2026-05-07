@@ -19,14 +19,27 @@ public:
                     const juce::String& serverType,
                     const juce::String& encoderType);
 
+    /// Remove all station blocks.
+    void clearStations();
+
+    /// Get station blocks for wiring callbacks.
+    const std::vector<std::unique_ptr<StationBlock>>& stationBlocks() const {
+        return stationBlocks_;
+    }
+    std::vector<std::unique_ptr<StationBlock>>& stationBlocks() {
+        return stationBlocks_;
+    }
+
     /// Callbacks
     std::function<void()> onConnectAll;
     std::function<void()> onDisconnectAll;
+    std::function<void()> onAddStation;
 
 private:
     juce::Label headerLabel_{"", "Streaming"};
     juce::TextButton connectAllBtn_;
     juce::TextButton disconnectAllBtn_;
+    juce::TextButton addStationBtn_{"+"};
 
     std::vector<std::unique_ptr<StationBlock>> stationBlocks_;
 

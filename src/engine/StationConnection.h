@@ -8,8 +8,11 @@
 // ═══════════════════════════════════════════════════════════════════════
 #pragma once
 
+#include <JuceHeader.h>
 #include "BroadcastDistributor.h"
 #include "encoders/encoder_interface.h"
+#include "protocols/icecast_client.h"
+#include "protocols/shoutcast_client.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -19,7 +22,19 @@
 #include <thread>
 #include <vector>
 
+#ifdef HAVE_SAMPLERATE
+#include <samplerate.h>
+#endif
+
 namespace ore {
+
+class BroadcastDistributor;
+class DSPEffects;
+class VST3HostProcessor;
+class RecordingEngine;
+
+/// VU meter data for UI display
+struct VUMeterData;
 
 class StationConnection {
 public:
@@ -43,7 +58,7 @@ public:
 
     /// Feed audio data into this station's ring buffer.
     /// Called from the mixer thread (via BroadcastDistributor::distribute).
-    void feedAudio(const float* buffer, int frames, int channels);
+    void feedAudio(const float* buffer, int frames, int channels, int sampleRate);
 
     /// Get a snapshot of the current status.
     StationStatus status() const;
@@ -88,17 +103,32 @@ private:
     // Encoder
     std::unique_ptr<IEncoder> encoder_;
 
+    // Protocol clients (one or the other, depending on serverType)
+    std::unique_ptr<IcecastClient> icecastClient_;
+    std::unique_ptr<ShoutcastClient> shoutcastClient_;
+
     // Encoded output buffer
     std::vector<uint8_t> encodeBuffer_;
+
+    // Metadata queue (must be sent from streaming thread for thread safety)
+    std::mutex metadataMutex_;
+    std::string pendingSongName_;
+    bool hasPendingMetadata_ = false;
+
+    void sendPendingMetadata();
+
+    // Resampling
+    std::atomic<int> inputSampleRate_{0};
+#ifdef HAVE_SAMPLERATE
+    SRC_STATE* resampler_ = nullptr;
+    std::vector<float> resampleBuffer_;
+#endif
 
     // Statistics
     std::atomic<double> kbytesSent_{0.0};
     std::atomic<double> streamStartTime_{0.0};
     std::atomic<int> listenerCount_{0};
     std::string errorMessage_;
-
-    // Socket (managed by protocol handler)
-    int socket_ = -1;
 };
 
 } // namespace ore

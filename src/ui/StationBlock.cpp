@@ -16,10 +16,9 @@ StationBlock::StationBlock(int stationId, const juce::String& name,
     enabledCheck_.setToggleState(true, juce::dontSendNotification);
     addAndMakeVisible(enabledCheck_);
 
-    auto title = juce::String("Station #") + juce::String(stationId)
-                 + " [ " + serverType + " | " + encoderType + " Encoder ]";
+    auto title = name + " [ " + serverType + " | " + encoderType + " ]";
     titleLabel_.setText(title, juce::dontSendNotification);
-    titleLabel_.setFont(juce::Font(13.0f, juce::Font::bold));
+    titleLabel_.setFont(juce::Font(juce::FontOptions(13.0f, juce::Font::bold)));
     titleLabel_.setColour(juce::Label::textColourId,
                           juce::Colour(LookAndFeel_OpenRadio::kTextPrimary));
     addAndMakeVisible(titleLabel_);
@@ -31,26 +30,38 @@ StationBlock::StationBlock(int stationId, const juce::String& name,
     connectBtn_.onClick = [this]() { if (onConnect) onConnect(); };
     disconnectBtn_.onClick = [this]() { if (onDisconnect) onDisconnect(); };
 
+    editBtn_.setButtonText("...");
+    editBtn_.setColour(juce::TextButton::buttonColourId, juce::Colour(0x00444444));
+    editBtn_.setTooltip("Edit station configuration");
+    editBtn_.onClick = [this]() { if (onEdit) onEdit(); };
+    addAndMakeVisible(editBtn_);
+
+    deleteBtn_.setButtonText("X");
+    deleteBtn_.setColour(juce::TextButton::buttonColourId,
+                          juce::Colour(0xCC333333));
+    deleteBtn_.onClick = [this]() { if (onDelete) onDelete(); };
+    addAndMakeVisible(deleteBtn_);
+
     // ── Stream Time ──
-    streamTimeLabelHeader_.setFont(juce::Font(11.0f));
+    streamTimeLabelHeader_.setFont(juce::Font(juce::FontOptions(11.0f)));
     streamTimeLabelHeader_.setColour(juce::Label::textColourId,
                                      juce::Colour(LookAndFeel_OpenRadio::kTextSecondary));
     addAndMakeVisible(streamTimeLabelHeader_);
 
     streamTimeLabel_.setText("--:--:--", juce::dontSendNotification);
-    streamTimeLabel_.setFont(juce::Font("Courier New", 22.0f, juce::Font::bold));
+    streamTimeLabel_.setFont(juce::Font(juce::FontOptions("Courier New", 22.0f, juce::Font::bold)));
     streamTimeLabel_.setColour(juce::Label::textColourId,
                                 juce::Colour(LookAndFeel_OpenRadio::kAccentGreen));
     addAndMakeVisible(streamTimeLabel_);
 
     // ── Listeners ──
-    listenersLabelHeader_.setFont(juce::Font(11.0f));
+    listenersLabelHeader_.setFont(juce::Font(juce::FontOptions(11.0f)));
     listenersLabelHeader_.setColour(juce::Label::textColourId,
                                      juce::Colour(LookAndFeel_OpenRadio::kTextSecondary));
     addAndMakeVisible(listenersLabelHeader_);
 
     listenersLabel_.setText("0", juce::dontSendNotification);
-    listenersLabel_.setFont(juce::Font(22.0f, juce::Font::bold));
+    listenersLabel_.setFont(juce::Font(juce::FontOptions(22.0f, juce::Font::bold)));
     listenersLabel_.setColour(juce::Label::textColourId,
                                juce::Colour(LookAndFeel_OpenRadio::kTextPrimary));
     addAndMakeVisible(listenersLabel_);
@@ -71,31 +82,36 @@ void StationBlock::paint(juce::Graphics& g) {
 void StationBlock::resized() {
     auto bounds = getLocalBounds().reduced(10, 8);
 
-    // Row 1: Checkbox + Title
+    // Row 1: Checkbox + Title + Edit + Delete button
     auto row1 = bounds.removeFromTop(22);
     enabledCheck_.setBounds(row1.removeFromLeft(22));
+    deleteBtn_.setBounds(row1.removeFromRight(28).reduced(0, 2));
+    row1.removeFromRight(4);
+    editBtn_.setBounds(row1.removeFromRight(28).reduced(0, 2));
+    row1.removeFromRight(4);
     titleLabel_.setBounds(row1);
 
     bounds.removeFromTop(6);
 
-    // Row 2+3: Buttons on left, status on right
-    auto leftCol = bounds.removeFromLeft(bounds.getWidth() / 2);
-    auto rightCol = bounds;
+    // Row 2: Status area
+    auto statusRow = bounds.removeFromTop(40);
+    auto timeCol = statusRow.removeFromLeft(statusRow.getWidth() * 0.7f);
+    auto listCol = statusRow;
 
-    // Connect / Disconnect buttons
-    connectBtn_.setBounds(leftCol.removeFromTop(30).reduced(0, 2));
-    leftCol.removeFromTop(4);
-    disconnectBtn_.setBounds(leftCol.removeFromTop(30).reduced(0, 2));
-
-    // Stream Time + Listeners
-    auto timeCol = rightCol.removeFromLeft(rightCol.getWidth() * 2 / 3);
-    auto listCol = rightCol;
-
-    streamTimeLabelHeader_.setBounds(timeCol.removeFromTop(16));
+    streamTimeLabelHeader_.setBounds(timeCol.removeFromTop(14));
     streamTimeLabel_.setBounds(timeCol);
 
-    listenersLabelHeader_.setBounds(listCol.removeFromTop(16));
+    listenersLabelHeader_.setBounds(listCol.removeFromTop(14));
     listenersLabel_.setBounds(listCol);
+
+    bounds.removeFromTop(6);
+
+    // Row 3: Action buttons (side by side)
+    auto btnRow = bounds.removeFromTop(28);
+    int btnW = (btnRow.getWidth() - 8) / 2;
+    connectBtn_.setBounds(btnRow.removeFromLeft(btnW));
+    btnRow.removeFromLeft(8);
+    disconnectBtn_.setBounds(btnRow);
 }
 
 void StationBlock::setStreamTime(const juce::String& time) {
@@ -118,6 +134,10 @@ void StationBlock::setConnected(bool connected) {
     isConnected_ = connected;
     connectBtn_.setEnabled(!connected);
     disconnectBtn_.setEnabled(connected);
+    
+    if (!connected) {
+        streamTimeLabel_.setText("--:--:--", juce::dontSendNotification);
+    }
 }
 
 } // namespace ore

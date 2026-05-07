@@ -43,14 +43,27 @@ LookAndFeel_OpenRadio::LookAndFeel_OpenRadio() {
     setColour(juce::ListBox::backgroundColourId, juce::Colour(kSurface));
     setColour(juce::ListBox::textColourId, juce::Colour(kTextPrimary));
 
-    // Use a modern font
-    setDefaultSansSerifTypeface(
-        juce::Typeface::createSystemTypefaceFor(
-            juce::Font("Inter", 13.0f, juce::Font::plain)));
+    // Slider colours
+    setColour(juce::Slider::thumbColourId, juce::Colour(kAccentBlue));
+    setColour(juce::Slider::trackColourId, juce::Colour(kAccentGreen));
+    setColour(juce::Slider::rotarySliderFillColourId, juce::Colour(kAccentBlue));
+    setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour(kBorder));
+    setColour(juce::Slider::backgroundColourId, juce::Colour(kSurface));
+    setColour(juce::Slider::textBoxTextColourId, juce::Colour(kTextPrimary));
+    setColour(juce::Slider::textBoxBackgroundColourId, juce::Colour(kSurface));
+    setColour(juce::Slider::textBoxOutlineColourId, juce::Colour(kBorder));
 }
 
 juce::Font LookAndFeel_OpenRadio::getDefaultFont() const {
-    return juce::Font("Inter", 13.0f, juce::Font::plain);
+    return juce::Font(juce::FontOptions(16.0f));
+}
+
+juce::Font LookAndFeel_OpenRadio::getComboBoxFont(juce::ComboBox&) {
+    return getDefaultFont();
+}
+
+juce::Font LookAndFeel_OpenRadio::getLabelFont(juce::Label&) {
+    return getDefaultFont();
 }
 
 void LookAndFeel_OpenRadio::drawButtonBackground(juce::Graphics& g, juce::Button& button,
@@ -89,7 +102,9 @@ void LookAndFeel_OpenRadio::drawGroupComponentOutline(juce::Graphics& g, int w, 
                                                        const juce::Justification& /*pos*/,
                                                        juce::GroupComponent& /*group*/) {
     auto font = getDefaultFont().withHeight(14.0f);
-    auto textW = font.getStringWidth(text) + 8;
+    juce::GlyphArrangement ga;
+    ga.addLineOfText(font, text, 0.0f, 0.0f);
+    auto textW = ga.getBoundingBox(0, text.length(), true).getWidth() + 8;
     auto indent = 10;
     auto textY = 0;
 

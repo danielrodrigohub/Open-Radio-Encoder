@@ -16,6 +16,8 @@ public:
     void paint(juce::Graphics& g) override;
     void resized() override;
 
+    int stationId() const { return stationId_; }
+
     /// Update the display with real-time status data.
     void setStreamTime(const juce::String& time);
     void setStreamStatus(const juce::String& status);
@@ -25,6 +27,8 @@ public:
     /// Callbacks
     std::function<void()> onConnect;
     std::function<void()> onDisconnect;
+    std::function<void()> onDelete;
+    std::function<void()> onEdit;
 
 private:
     int stationId_;
@@ -33,6 +37,8 @@ private:
     juce::Label titleLabel_;
     juce::TextButton connectBtn_{"Connect"};
     juce::TextButton disconnectBtn_{"Disconnect"};
+    juce::TextButton deleteBtn_{"X"};
+    juce::TextButton editBtn_{""};
     juce::Label streamTimeLabel_;
     juce::Label streamTimeLabelHeader_{"", "Stream Time"};
     juce::Label listenersLabel_;

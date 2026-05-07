@@ -41,7 +41,7 @@ int TwoLameEncoder::init(const EncoderConfig& config) {
 
     // MP2 standard samplerates: 32000, 44100, 48000
     // Energy level extensions (for broadcast compliance)
-    twolame_set_energy_levels(opts_, 1);
+    twolame_set_energy_levels(opts_, 0);
 
     // Error protection (CRC) for broadcast reliability
     twolame_set_error_protection(opts_, TRUE);

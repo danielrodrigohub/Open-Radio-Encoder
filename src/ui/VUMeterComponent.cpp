@@ -115,11 +115,11 @@ void VUMeterComponent::paint(juce::Graphics& g) {
 
     // ── "dB" label at top ──
     g.setColour(juce::Colour(LookAndFeel_OpenRadio::kTextSecondary));
-    g.setFont(juce::Font(11.0f));
+    g.setFont(juce::Font(juce::FontOptions(11.0f)));
     g.drawText("dB", bounds.removeFromTop(topPad), juce::Justification::centred);
 
     // ── Scale Labels ──
-    g.setFont(juce::Font(10.0f));
+    g.setFont(juce::Font(juce::FontOptions(10.0f)));
     for (const auto& mark : scaleMarks_) {
         float pos = dbToPosition(mark.dB);
         int y = topPad + static_cast<int>((1.0f - pos) * meterHeight);

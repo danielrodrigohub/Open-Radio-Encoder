@@ -25,17 +25,7 @@
 #include <string>
 #include <vector>
 
-// Forward declarations (avoid including JUCE in this header)
-// When building with JUCE, these will resolve to real types.
-// When building standalone butt-core, this file is not compiled.
-
-namespace juce {
-    class AudioProcessorGraph;
-    class AudioPluginFormatManager;
-    class AudioProcessorEditor;
-    class AudioBuffer;
-    class MidiBuffer;
-}
+#include <JuceHeader.h>
 
 namespace ore {
 
@@ -106,10 +96,8 @@ private:
     int blockSize_ = 1024;
     int numChannels_ = 2;
 
-    // JUCE objects (only available when building with JUCE)
-    // In production, these would be:
-    //   std::unique_ptr<juce::AudioProcessorGraph> graph_;
-    //   std::unique_ptr<juce::AudioPluginFormatManager> formatManager_;
+    std::unique_ptr<juce::AudioProcessorGraph> graph_;
+    std::unique_ptr<juce::AudioPluginFormatManager> formatManager_;
 };
 
 } // namespace ore

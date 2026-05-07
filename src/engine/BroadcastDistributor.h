@@ -50,6 +50,9 @@ struct StationConfig {
     // Encoder
     EncoderConfig encoder;
 
+    // Reconnection
+    int reconnectInterval = 5; // seconds
+
     // ICY metadata
     std::string icyName = "";
     std::string icyGenre = "";
@@ -125,7 +128,8 @@ public:
     /// @param buffer  Interleaved float32 PCM
     /// @param frames  Number of frames (samples per channel)
     /// @param channels Number of channels
-    void distribute(const float* buffer, int frames, int channels);
+    /// @param sampleRate The current pipeline sample rate
+    void distribute(const float* buffer, int frames, int channels, int sampleRate);
 
     // ── Status ──
 

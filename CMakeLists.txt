@@ -21,8 +21,17 @@ endif()
 # ─────────────────────────────────────────────
 find_package(PkgConfig REQUIRED)
 
-# Audio I/O
-pkg_check_modules(PORTAUDIO portaudio-2.0)
+# Audio
+find_library(PORTAUDIO_LIBRARY NAMES portaudio)
+find_path(PORTAUDIO_INCLUDE_DIR NAMES portaudio.h)
+if(PORTAUDIO_LIBRARY AND PORTAUDIO_INCLUDE_DIR)
+    add_library(PORTAUDIO::portaudio UNKNOWN IMPORTED)
+    set_target_properties(PORTAUDIO::portaudio PROPERTIES
+        IMPORTED_LOCATION "${PORTAUDIO_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${PORTAUDIO_INCLUDE_DIR}"
+    )
+    set(PORTAUDIO_FOUND TRUE)
+endif()
 
 # Encoders
 find_library(LAME_LIBRARY NAMES mp3lame)
@@ -36,6 +45,7 @@ if(LAME_LIBRARY AND LAME_INCLUDE_DIR)
     set(LAME_FOUND TRUE)
 endif()
 
+pkg_check_modules(OGG IMPORTED_TARGET ogg)
 pkg_check_modules(TWOLAME IMPORTED_TARGET twolame)
 pkg_check_modules(OPUS IMPORTED_TARGET opus)
 pkg_check_modules(VORBIS IMPORTED_TARGET vorbis vorbisenc)
@@ -91,6 +101,22 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/JUCE/CMakeLists.txt")
         src/engine/VST3HostProcessor.cpp
         src/engine/VST3HostProcessor.h
 
+        # Config
+        src/config/ConfigManager.cpp
+        src/config/ConfigManager.h
+
+        # Dialogs
+        src/ui/dialogs/SettingsDialog.cpp
+        src/ui/dialogs/SettingsDialog.h
+        src/ui/dialogs/AudioFxDialog.cpp
+        src/ui/dialogs/AudioFxDialog.h
+        src/ui/dialogs/MixerDialog.cpp
+        src/ui/dialogs/MixerDialog.h
+        src/ui/dialogs/SchedulerDialog.cpp
+        src/ui/dialogs/SchedulerDialog.h
+        src/ui/dialogs/ManagerDialogs.cpp
+        src/ui/dialogs/ManagerDialogs.h
+
         # UI
         src/ui/MainWindow.cpp
         src/ui/MainWindow.h
@@ -108,10 +134,14 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/JUCE/CMakeLists.txt")
         src/ui/RecordingPanel.h
         src/ui/VUMeterComponent.cpp
         src/ui/VUMeterComponent.h
+        src/ui/ConsoleLogComponent.cpp
+        src/ui/ConsoleLogComponent.h
+        src/ui/Icons.h
     )
 
     target_include_directories(OpenRadioEncoder PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/ui
         ${CMAKE_CURRENT_SOURCE_DIR}/libs/butt-core
     )
 
@@ -122,6 +152,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/JUCE/CMakeLists.txt")
         JUCE_PLUGINHOST_VST3=1
         JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:OpenRadioEncoder,JUCE_PRODUCT_NAME>"
         JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:OpenRadioEncoder,JUCE_VERSION>"
+        JUCE_MODAL_LOOPS_PERMITTED=1
     )
 
     juce_generate_juce_header(OpenRadioEncoder)

@@ -46,7 +46,7 @@ struct EncoderConfig {
         switch (codec) {
             case CodecType::MP3:    return "MP3";
             case CodecType::MP2:    return "MP2";
-            case CodecType::AAC:    return "AAC";
+            case CodecType::AAC:    return "AAC-HE";
             case CodecType::Opus:   return "Opus";
             case CodecType::Vorbis: return "Vorbis";
             case CodecType::FLAC:   return "FLAC";
@@ -88,6 +88,9 @@ public:
 
     /// Close and free encoder resources.
     virtual void close() = 0;
+
+    /// Update metadata (for in-band metadata codecs like Ogg/Opus/Vorbis)
+    virtual void updateMetadata(const std::string& /*song*/) {}
 
     /// Get the codec type
     virtual CodecType type() const = 0;

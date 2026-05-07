@@ -1,0 +1,180 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          brew install portaudio lame twolame libogg libvorbis opus flac \
+            libshout libsamplerate openssl fdk-aac
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+
+      - name: Build
+        run: cmake --build build --config Release -j$(sysctl -n hw.ncpu)
+
+      - name: Package DMG
+        run: |
+          mkdir -p release/OpenRadioEncoder.app
+          cp -R build/OpenRadioEncoder_artefacts/Release/OpenRadioEncoder.app release/
+          hdiutil create -volname "OpenRadioEncoder" \
+            -srcfolder release/OpenRadioEncoder.app \
+            -ov -format UDZO \
+            release/OpenRadioEncoder-macOS.dmg
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: release/OpenRadioEncoder-macOS.dmg
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup vcpkg
+        run: |
+          vcpkg install portaudio lame twolame opus libvorbis libogg flac \
+            fdk-aac libshout libsamplerate openssl --triplet x64-windows
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$Env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake"
+
+      - name: Build
+        run: cmake --build build --config Release -j $env:NUMBER_OF_PROCESSORS
+
+      - name: Package
+        run: |
+          mkdir release
+          Compress-Archive -Path "build/OpenRadioEncoder_artefacts/Release/OpenRadioEncoder.exe" `
+            -DestinationPath "release/OpenRadioEncoder-Windows.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: release/OpenRadioEncoder-Windows.zip
+
+  build-ubuntu:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential \
+            libportaudio2 portaudio19-dev \
+            libmp3lame-dev libtwolame-dev \
+            libopus-dev libvorbis-dev libogg-dev \
+            libflac-dev libfdk-aac-dev \
+            libshout3-dev libsamplerate0-dev \
+            libssl-dev \
+            libfreetype-dev libfontconfig-dev \
+            libcurl4-openssl-dev libasound2-dev \
+            libx11-dev libxcomposite-dev libxext-dev libxrandr-dev \
+            libglu1-mesa-dev libxcursor-dev
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release -j$(nproc)
+
+      - name: Package AppImage
+        run: |
+          mkdir -p release
+          cp build/OpenRadioEncoder_artefacts/Release/OpenRadioEncoder release/
+          # Create a basic AppImage structure
+          mkdir -p release/OpenRadioEncoder.AppDir/usr/bin
+          mkdir -p release/OpenRadioEncoder.AppDir/usr/share/icons/hicolor/256x256/apps
+          cp build/OpenRadioEncoder_artefacts/Release/OpenRadioEncoder \
+            release/OpenRadioEncoder.AppDir/usr/bin/
+          cp resources/icons/appicon.png \
+            release/OpenRadioEncoder.AppDir/usr/share/icons/hicolor/256x256/apps/openradio.png 2>/dev/null || true
+          cp release/OpenRadioEncoder.AppDir/usr/bin/OpenRadioEncoder \
+            release/OpenRadioEncoder.AppDir/AppRun 2>/dev/null || true
+          chmod +x release/OpenRadioEncoder.AppDir/AppRun 2>/dev/null || true
+          # Package as tar.gz (AppImage builder not available)
+          tar -czf release/OpenRadioEncoder-ubuntu.tar.gz \
+            -C release/OpenRadioEncoder.AppDir .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-build
+          path: release/OpenRadioEncoder-ubuntu.tar.gz
+
+  release:
+    needs: [build-macos, build-windows, build-ubuntu]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-build'
+          merge-multiple: true
+
+      - name: Display structure
+        run: ls -laR
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Open Radio Encoder v${{ github.ref_name }}"
+          body: |
+            ## Open Radio Encoder ${{ github.ref_name }}
+
+            Multi-station internet radio streaming encoder. Made in Chile with Love!
+
+            ### Downloads
+
+            | Platform | File |
+            |----------|------|
+            | macOS (x86_64 + arm64) | `OpenRadioEncoder-macOS.dmg` |
+            | Windows (x64) | `OpenRadioEncoder-Windows.zip` |
+            | Ubuntu / Linux (x64) | `OpenRadioEncoder-ubuntu.tar.gz` |
+
+            ### CLI Flags
+
+            - `-h, --help` — Show help
+            - `-v, --version` — Show version
+            - `-c, --config <path>` — Custom config path
+            - `--headless` — No GUI mode
+            - `--verbose` — Verbose logging
+
+            ### Build from Source
+
+            See [README.md](https://github.com/danielrodrigohub/Open-Radio-Encoder/blob/main/README.md) for build instructions.
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            *.dmg
+            *.zip
+            *.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

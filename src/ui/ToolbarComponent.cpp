@@ -1,49 +1,69 @@
-// ═══════════════════════════════════════════════════════════════════════
-// Open Radio Encoder — Toolbar Component Implementation
-// ═══════════════════════════════════════════════════════════════════════
 #include "ToolbarComponent.h"
 #include "LookAndFeel_OpenRadio.h"
 
 namespace ore {
 
 ToolbarComponent::ToolbarComponent() {
-    // Match the BUTTM toolbar: Settings, Scheduler, Station Manager,
-    // Server Manager, Encoder Manager, Audio Effects, Audio Mixer
-    addToolbarButton("Settings",        juce::String::charToString(0x2699));  // ⚙
-    addToolbarButton("Scheduler",       juce::String::charToString(0x1F4C5)); // 📅
-    addToolbarButton("Station Mgr",     juce::String::charToString(0x1F4E1)); // 📡
-    addToolbarButton("Server Mgr",      juce::String::charToString(0x1F5A5)); // 🖥
-    addToolbarButton("Encoder Mgr",     juce::String::charToString(0x1F3B5)); // 🎵
-    addToolbarButton("Audio FX",        juce::String::charToString(0x2728));  // ✨
-    addToolbarButton("Audio Mixer",     juce::String::charToString(0x1F39A)); // 🎚
+    addButton("Streaming",   Icons::satellite());
+    addButton("Settings",    Icons::gear());
+    addButton("Scheduler",   Icons::calendar());
+    addButton("Station Mgr", Icons::server());
+    addButton("Console",    Icons::music());
+    addButton("Audio FX",    Icons::audioFx());
+    addButton("Mixer",       Icons::mixer());
+
+    cpuLabel_.setFont(juce::Font(juce::FontOptions("Courier New", 12.0f, juce::Font::bold)));
+    cpuLabel_.setColour(juce::Label::textColourId, juce::Colour(LookAndFeel_OpenRadio::kTextSecondary));
+    cpuLabel_.setText("CPU: 0.0%", juce::dontSendNotification);
+    addAndMakeVisible(cpuLabel_);
 }
 
-void ToolbarComponent::addToolbarButton(const juce::String& label, const juce::String& icon) {
-    ToolbarButton tb;
-    tb.label = label;
-    tb.icon = icon;
-    tb.button = std::make_unique<juce::TextButton>(icon + "\n" + label);
-    tb.button->setColour(juce::TextButton::buttonColourId,
-                         juce::Colour(LookAndFeel_OpenRadio::kToolbarBg));
-    addAndMakeVisible(tb.button.get());
-    buttons_.push_back(std::move(tb));
+void ToolbarComponent::addButton(const juce::String& label, juce::Path icon) {
+    auto btn = std::make_unique<ToolbarButton>(label, std::move(icon));
+    int index = static_cast<int>(buttons_.size());
+    btn->onClick = [this, index]() {
+        setSelectedTab(index);
+        if (onButtonClicked) onButtonClicked(index);
+    };
+    addAndMakeVisible(btn.get());
+    buttons_.push_back(std::move(btn));
+}
+
+void ToolbarComponent::setSelectedTab(int index) {
+    selectedIndex_ = index;
+    for (int i = 0; i < static_cast<int>(buttons_.size()); i++) {
+        buttons_[static_cast<size_t>(i)]->setSelected(i == index);
+    }
+}
+
+void ToolbarComponent::setCpuUsage(float percent) {
+    cpuLabel_.setText("CPU: " + juce::String(percent, 1) + "%", juce::dontSendNotification);
+    if (percent > 80.0f) cpuLabel_.setColour(juce::Label::textColourId, juce::Colour(LookAndFeel_OpenRadio::kAccentRed));
+    else if (percent > 50.0f) cpuLabel_.setColour(juce::Label::textColourId, juce::Colour(LookAndFeel_OpenRadio::kVUYellow));
+    else cpuLabel_.setColour(juce::Label::textColourId, juce::Colour(LookAndFeel_OpenRadio::kTextSecondary));
 }
 
 void ToolbarComponent::paint(juce::Graphics& g) {
     g.setColour(juce::Colour(LookAndFeel_OpenRadio::kToolbarBg));
     g.fillRect(getLocalBounds());
 
-    // Bottom separator line
     g.setColour(juce::Colour(LookAndFeel_OpenRadio::kBorder));
     g.drawLine(0, (float)getHeight() - 1, (float)getWidth(), (float)getHeight() - 1);
 }
 
 void ToolbarComponent::resized() {
-    auto bounds = getLocalBounds().reduced(5);
-    int buttonWidth = bounds.getWidth() / static_cast<int>(buttons_.size());
+    auto bounds = getLocalBounds().reduced(4, 4);
+    
+    // Reserve space for CPU label on the right
+    auto cpuArea = bounds.removeFromRight(100);
+    cpuLabel_.setBounds(cpuArea.withSize(100, 20).withCentre(cpuArea.getCentre()));
 
-    for (auto& tb : buttons_) {
-        tb.button->setBounds(bounds.removeFromLeft(buttonWidth).reduced(2));
+    int count = static_cast<int>(buttons_.size());
+    if (count == 0) return;
+    int buttonWidth = bounds.getWidth() / count;
+
+    for (auto& btn : buttons_) {
+        btn->setBounds(bounds.removeFromLeft(buttonWidth).reduced(2));
     }
 }
 

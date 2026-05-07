@@ -4,6 +4,9 @@
 // ═══════════════════════════════════════════════════════════════════════
 #include "AudioPipeline.h"
 #include "BroadcastDistributor.h"
+#include "VST3HostProcessor.h"
+#include "RecordingEngine.h"
+#include "dsp/dsp_effects.h"
 
 #ifdef HAVE_PORTAUDIO
 #include <portaudio.h>
@@ -30,39 +33,38 @@ static inline size_t ringAvailableRead(size_t writePos, size_t readPos, size_t c
 // ─────────────────────────────────────────────
 AudioPipeline::AudioPipeline() {
     distributor_ = std::make_unique<BroadcastDistributor>();
+    recordingEngine_ = std::make_unique<RecordingEngine>();
+
+#ifdef HAVE_PORTAUDIO
+    PaError err = Pa_Initialize();
+    if (err != paNoError) {
+        fprintf(stderr, "[AudioPipeline] Pa_Initialize failed: %s\n", Pa_GetErrorText(err));
+    }
+#endif
 }
 
 AudioPipeline::~AudioPipeline() {
     stop();
+#ifdef HAVE_PORTAUDIO
+    Pa_Terminate();
+#endif
 }
 
 // ─────────────────────────────────────────────
 // Initialize PortAudio
 // ─────────────────────────────────────────────
 int AudioPipeline::initialize(const PipelineConfig& config) {
-    config_ = config;
-
 #ifdef HAVE_PORTAUDIO
-    PaError err = Pa_Initialize();
-    if (err != paNoError) {
-        fprintf(stderr, "[AudioPipeline] Pa_Initialize failed: %s\n", Pa_GetErrorText(err));
-        return -1;
-    }
-
-    // Allocate ring buffer: 16x buffer size for safety
-    ringCapacity_ = config_.bufferSize * config_.channels * 16;
-    ringBuffer_.resize(ringCapacity_, 0.0f);
-    ringWritePos_.store(0);
-    ringReadPos_.store(0);
-
-    // Allocate processing buffer
-    processedBuffer_.resize(config_.bufferSize * config_.channels, 0.0f);
-
     // Open PortAudio stream
     PaStreamParameters params;
-    PaDeviceIndex devId = (config_.deviceIndex >= 0)
-        ? config_.deviceIndex
+    PaDeviceIndex devId = (config.deviceIndex >= 0)
+        ? config.deviceIndex
         : Pa_GetDefaultInputDevice();
+
+    if (devId == paNoDevice) {
+        fprintf(stderr, "[AudioPipeline] No default input device found\n");
+        return -1;
+    }
 
     const PaDeviceInfo* devInfo = Pa_GetDeviceInfo(devId);
     if (!devInfo) {
@@ -70,29 +72,94 @@ int AudioPipeline::initialize(const PipelineConfig& config) {
         return -1;
     }
 
+    const PaHostApiInfo* hostInfo = Pa_GetHostApiInfo(devInfo->hostApi);
+    fprintf(stdout, "[AudioPipeline] Initializing device %d: %s\n", devId, devInfo->name);
+    fprintf(stdout, "               Host API: %s\n", hostInfo ? hostInfo->name : "Unknown");
+    fprintf(stdout, "               Max Input Channels: %d\n", devInfo->maxInputChannels);
+    fprintf(stdout, "               Default Sample Rate: %.1f Hz\n", devInfo->defaultSampleRate);
+    fprintf(stdout, "               Requested: %d ch @ %d Hz\n", config.channels, config.sampleRate);
+
+    // Check if device supports input
+    if (devInfo->maxInputChannels <= 0) {
+        fprintf(stderr, "[AudioPipeline] Device '%s' has no input channels\n", devInfo->name);
+        return -1;
+    }
+
+    // Clamp to available channels
+    int actualChannels = std::min(config.channels, devInfo->maxInputChannels);
+    if (actualChannels < 1) actualChannels = 1;
+    
     params.device = devId;
-    params.channelCount = devInfo->maxInputChannels;
+    params.channelCount = actualChannels;
     params.sampleFormat = paFloat32;
     params.suggestedLatency = devInfo->defaultHighInputLatency;
     params.hostApiSpecificStreamInfo = nullptr;
 
-    err = Pa_OpenStream(
+    // Verify format
+    PaError formatErr = Pa_IsFormatSupported(&params, nullptr, config.sampleRate);
+    if (formatErr != paFormatIsSupported) {
+        fprintf(stderr, "[AudioPipeline] Format check failed: %s\n", Pa_GetErrorText(formatErr));
+    }
+
+    // Try to open the stream
+    PaError err = Pa_OpenStream(
         reinterpret_cast<PaStream**>(&paStream_),
         &params, nullptr,
-        config_.sampleRate,
-        config_.bufferSize,
+        config.sampleRate,
+        config.bufferSize,
         paNoFlag,
         &AudioPipeline::paCallback,
         this
     );
 
+    // Fallback: If 2 channels failed, try 1 channel
+    if (err == paInvalidChannelCount && actualChannels > 1) {
+        fprintf(stdout, "[AudioPipeline] 2-channel open failed, retrying with mono...\n");
+        actualChannels = 1;
+        params.channelCount = 1;
+        err = Pa_OpenStream(
+            reinterpret_cast<PaStream**>(&paStream_),
+            &params, nullptr,
+            config.sampleRate,
+            config.bufferSize,
+            paNoFlag,
+            &AudioPipeline::paCallback,
+            this
+        );
+    }
+
     if (err != paNoError) {
-        fprintf(stderr, "[AudioPipeline] Pa_OpenStream failed: %s\n", Pa_GetErrorText(err));
+        fprintf(stderr, "[AudioPipeline] Pa_OpenStream failed: %s (ch=%d, rate=%d)\n", 
+                Pa_GetErrorText(err), actualChannels, config.sampleRate);
         return -1;
     }
 
-    fprintf(stdout, "[AudioPipeline] Opened device '%s' @ %d Hz, %d ch, %d frames\n",
+    // Success! Update internal config
+    config_ = config;
+    config_.channels = actualChannels;
+    
+    // EXPLICIT LOGGING FOR RESAMPLING VERIFICATION
+    fprintf(stdout, "[AudioPipeline] SYSTEM SAMPLE RATE SET TO: %d Hz\n", config_.sampleRate);
+
+    // Ensure buffers match the actual channel count
+    ringCapacity_ = config_.bufferSize * config_.channels * 16;
+    ringBuffer_.assign(ringCapacity_, 0.0f);
+    ringWritePos_.store(0);
+    ringReadPos_.store(0);
+    processedBuffer_.assign(config_.bufferSize * config_.channels, 0.0f);
+
+    fprintf(stdout, "[AudioPipeline] Successfully opened device '%s' @ %d Hz, %d ch, %d frames\n",
             devInfo->name, config_.sampleRate, config_.channels, config_.bufferSize);
+
+    // Initialize DSP effects (EQ + Compressor)
+    dsp_ = std::make_unique<DSPEffects>(
+        static_cast<uint32_t>(config_.bufferSize),
+        static_cast<uint8_t>(config_.channels),
+        static_cast<uint32_t>(config_.sampleRate));
+
+    // Initialize VST3 host processor
+    vst3Host_ = std::make_unique<VST3HostProcessor>();
+    vst3Host_->initialize(config_.sampleRate, config_.bufferSize, config_.channels);
 
     return 0;
 #else
@@ -106,19 +173,20 @@ int AudioPipeline::initialize(const PipelineConfig& config) {
 // ─────────────────────────────────────────────
 void AudioPipeline::start() {
     if (running_.load()) return;
-    running_.store(true);
-
+    
 #ifdef HAVE_PORTAUDIO
-    Pa_StartStream(reinterpret_cast<PaStream*>(paStream_));
+    if (paStream_) {
+        running_.store(true);
+        Pa_StartStream(reinterpret_cast<PaStream*>(paStream_));
+        mixerThread_ = std::thread(&AudioPipeline::mixerLoop, this);
+        fprintf(stdout, "[AudioPipeline] Started\n");
+    } else {
+        fprintf(stderr, "[AudioPipeline] Cannot start: Stream not initialized\n");
+    }
 #endif
-
-    mixerThread_ = std::thread(&AudioPipeline::mixerLoop, this);
-
-    fprintf(stdout, "[AudioPipeline] Started\n");
 }
 
 void AudioPipeline::stop() {
-    if (!running_.load()) return;
     running_.store(false);
 
     if (mixerThread_.joinable())
@@ -130,10 +198,33 @@ void AudioPipeline::stop() {
         Pa_CloseStream(reinterpret_cast<PaStream*>(paStream_));
         paStream_ = nullptr;
     }
-    Pa_Terminate();
 #endif
 
     fprintf(stdout, "[AudioPipeline] Stopped\n");
+}
+
+int AudioPipeline::restart(const PipelineConfig& config) {
+    fprintf(stdout, "[AudioPipeline] Restarting with new config...\n");
+    
+    // Save current config for recovery
+    PipelineConfig oldConfig = config_;
+    
+    stop();
+    
+    int rc = initialize(config);
+    if (rc == 0) {
+        start();
+    } else {
+        fprintf(stderr, "[AudioPipeline] Re-initialization failed, attempting to restore original config\n");
+        // Try to restore previous known good configuration
+        rc = initialize(oldConfig);
+        if (rc == 0) {
+            start();
+        } else {
+            fprintf(stderr, "[AudioPipeline] FATAL: Could not even restore original config\n");
+        }
+    }
+    return rc;
 }
 
 // ─────────────────────────────────────────────
@@ -182,6 +273,7 @@ int AudioPipeline::paCallback(const void* input, void* /*output*/,
 // ─────────────────────────────────────────────
 void AudioPipeline::mixerLoop() {
     const int frameSize = config_.bufferSize * config_.channels;
+    const double blockTimeSecs = static_cast<double>(config_.bufferSize) / config_.sampleRate;
 
     while (running_.load()) {
         // Wait for enough data in the ring buffer
@@ -193,6 +285,9 @@ void AudioPipeline::mixerLoop() {
             std::this_thread::sleep_for(std::chrono::microseconds(500));
             continue;
         }
+
+        // ── Start Timing ──
+        auto startTime = std::chrono::high_resolution_clock::now();
 
         // Read one frame from ring buffer
         for (int i = 0; i < frameSize; i++) {
@@ -210,12 +305,16 @@ void AudioPipeline::mixerLoop() {
         }
 
         // ── Stage 2: Internal DSP (EQ + Compressor) ──
-        // TODO: Call DSPEffects::processSamples() here
-        // This is where BUTT's streaming_dsp->processSamples(stream_buf) goes
+        if (dsp_ && dsp_->hasToProcessSamples()) {
+            dsp_->processSamples(processedBuffer_.data(), config_.bufferSize);
+        }
 
         // ── Stage 3: VST3 Plugin Chain ──
-        // TODO: Call AudioProcessorGraph::processBlock() here
-        // This is the NEW VST3 hosting step
+        if (vst3Host_ && !vst3Host_->plugins().empty()) {
+            vst3Host_->processBlock(processedBuffer_.data(),
+                                    config_.bufferSize,
+                                    config_.channels);
+        }
 
         // ── Stage 4: Clamp output ──
         for (int i = 0; i < frameSize; i++) {
@@ -229,8 +328,25 @@ void AudioPipeline::mixerLoop() {
         if (distributor_) {
             distributor_->distribute(processedBuffer_.data(),
                                      config_.bufferSize,
-                                     config_.channels);
+                                     config_.channels,
+                                     config_.sampleRate);
         }
+
+        // ── Stage 7: Recording feed ──
+        if (recordingEngine_ && recordingEngine_->isRecording()) {
+            recordingEngine_->feedAudio(processedBuffer_.data(),
+                                        config_.bufferSize,
+                                        config_.channels);
+        }
+
+        // ── End Timing & Calculate CPU Load ──
+        auto endTime = std::chrono::high_resolution_clock::now();
+        double elapsedSecs = std::chrono::duration<double>(endTime - startTime).count();
+        float blockCpu = static_cast<float>(elapsedSecs / blockTimeSecs);
+        
+        // Exponential smoothing (EMA) for a stable but reactive indicator
+        float currentCpu = cpuUsage_.load(std::memory_order_relaxed);
+        cpuUsage_.store(currentCpu * 0.9f + blockCpu * 0.1f, std::memory_order_relaxed);
     }
 }
 
@@ -272,20 +388,21 @@ void AudioPipeline::updateVUMeters(const float* buffer, int numFrames, int chann
 std::vector<AudioPipeline::DeviceInfo> AudioPipeline::getAvailableDevices() {
     std::vector<DeviceInfo> devices;
 #ifdef HAVE_PORTAUDIO
-    Pa_Initialize();
-    int count = Pa_GetDeviceCount();
-    for (int i = 0; i < count; i++) {
-        const PaDeviceInfo* info = Pa_GetDeviceInfo(i);
-        if (info && info->maxInputChannels > 0) {
-            devices.push_back({
-                i,
-                info->name ? info->name : "Unknown",
-                info->maxInputChannels,
-                static_cast<int>(info->defaultSampleRate)
-            });
+    if (Pa_Initialize() == paNoError) {
+        int count = Pa_GetDeviceCount();
+        for (int i = 0; i < count; i++) {
+            const PaDeviceInfo* info = Pa_GetDeviceInfo(i);
+            if (info && info->maxInputChannels > 0) {
+                devices.push_back({
+                    i,
+                    info->name ? info->name : "Unknown",
+                    info->maxInputChannels,
+                    static_cast<int>(info->defaultSampleRate)
+                });
+            }
         }
+        Pa_Terminate();
     }
-    Pa_Terminate();
 #endif
     return devices;
 }

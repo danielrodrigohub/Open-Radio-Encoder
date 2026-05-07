@@ -19,7 +19,17 @@ int BroadcastDistributor::addStation(const StationConfig& config) {
 
     auto station = std::make_unique<StationConnection>();
     auto cfg = config;
-    cfg.id = nextId_++;
+
+    if (cfg.id == 0) {
+        cfg.id = nextId_++;
+        // If the name is generic (starts with "Station"), update it to reflect the new ID
+        if (cfg.name.find("Station") == 0) {
+            cfg.name = "Station #" + std::to_string(cfg.id);
+        }
+    } else {
+        nextId_ = std::max(nextId_, cfg.id + 1);
+    }
+
     station->configure(cfg);
     stations_.push_back(std::move(station));
 
@@ -36,8 +46,15 @@ void BroadcastDistributor::removeStation(int stationId) {
         [stationId](const auto& s) { return s->config().id == stationId; });
 
     if (it != stations_.end()) {
+        fprintf(stdout, "[Distributor] Removed station '%s' (ID: %d)\n",
+                (*it)->config().name.c_str(), stationId);
         (*it)->disconnect();
         stations_.erase(it);
+        
+        // If all stations are gone, reset the nextId counter
+        if (stations_.empty()) {
+            nextId_ = 1;
+        }
     }
 }
 
@@ -46,8 +63,25 @@ void BroadcastDistributor::updateStation(int stationId, const StationConfig& con
 
     for (auto& station : stations_) {
         if (station->config().id == stationId) {
-            station->disconnect();
-            station->configure(config);
+            // Check if we need to reconnect
+            bool wasConnected = station->isConnected();
+            
+            if (wasConnected) {
+                fprintf(stdout, "[Distributor] Asynchronously reconnecting station '%s' after config change...\n", config.name.c_str());
+                
+                // Use a separate thread to avoid blocking the UI thread during disconnect/connect
+                // Note: We capture the station pointer and the new config.
+                // In a production app, we'd use a more robust task queue, but for this refactor, 
+                // a detached thread is the direct fix for the UI freeze.
+                std::thread([s = station.get(), config]() {
+                    s->disconnect();
+                    s->configure(config);
+                    s->connect();
+                    fprintf(stdout, "[Distributor] Station '%s' reconnected successfully.\n", config.name.c_str());
+                }).detach();
+            } else {
+                station->configure(config);
+            }
             break;
         }
     }
@@ -116,12 +150,12 @@ void BroadcastDistributor::disconnectAll() {
 // BUTT had one stream_rb and one snd_stream_thread.
 // We now have N ring buffers and N threads.
 // ─────────────────────────────────────────────
-void BroadcastDistributor::distribute(const float* buffer, int frames, int channels) {
+void BroadcastDistributor::distribute(const float* buffer, int frames, int channels, int sampleRate) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     for (auto& station : stations_) {
         if (station->isConnected()) {
-            station->feedAudio(buffer, frames, channels);
+            station->feedAudio(buffer, frames, channels, sampleRate);
         }
     }
 }

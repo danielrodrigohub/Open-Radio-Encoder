@@ -30,6 +30,9 @@ using PaStreamCallbackFlags = unsigned long;
 namespace ore {
 
 class BroadcastDistributor;
+class DSPEffects;
+class VST3HostProcessor;
+class RecordingEngine;
 
 /// VU meter data for UI display
 struct VUMeterData {
@@ -76,11 +79,30 @@ public:
     /// Get the broadcast distributor for managing station connections.
     BroadcastDistributor* distributor() { return distributor_.get(); }
 
+    /// Get the VST3 host processor for loading/managing plugins.
+    VST3HostProcessor* vst3Host() { return vst3Host_.get(); }
+
+    /// Get the DSP effects processor.
+    DSPEffects* dsp() { return dsp_.get(); }
+
+    /// Get the recording engine.
+    RecordingEngine* recordingEngine() { return recordingEngine_.get(); }
+
     /// Set master gain (linear, 1.0 = unity).
     void setMasterGain(float gain) { masterGain_.store(gain); }
 
+    /// Restart the pipeline with a new configuration.
+    /// Returns 0 on success, -1 on failure.
+    int restart(const PipelineConfig& config);
+
     /// Check if the pipeline is running.
     bool isRunning() const { return running_.load(); }
+
+    /// Get the current pipeline configuration.
+    const PipelineConfig& config() const { return config_; }
+
+    /// Get real-time CPU usage (0.0 to 1.0)
+    float cpuUsage() const { return cpuUsage_.load(std::memory_order_relaxed); }
 
     /// Get list of available audio devices.
     struct DeviceInfo {
@@ -108,6 +130,7 @@ private:
     PipelineConfig config_;
     std::atomic<bool> running_{false};
     std::atomic<float> masterGain_{1.0f};
+    std::atomic<float> cpuUsage_{0.0f};
 
     // Ring buffer for PA callback → mixer thread (lock-free SPSC)
     std::vector<float> ringBuffer_;
@@ -126,6 +149,9 @@ private:
 
     // Sub-systems
     std::unique_ptr<BroadcastDistributor> distributor_;
+    std::unique_ptr<DSPEffects> dsp_;
+    std::unique_ptr<VST3HostProcessor> vst3Host_;
+    std::unique_ptr<RecordingEngine> recordingEngine_;
 
     // PortAudio stream handle (void* to avoid portaudio.h in header)
     void* paStream_ = nullptr;

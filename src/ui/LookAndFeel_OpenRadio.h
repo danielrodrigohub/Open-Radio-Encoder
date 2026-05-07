@@ -32,6 +32,8 @@ public:
 
     // ── Font ──
     juce::Font getDefaultFont() const;
+    juce::Font getComboBoxFont(juce::ComboBox&) override;
+    juce::Font getLabelFont(juce::Label&) override;
 
     // ── Overrides ──
     void drawButtonBackground(juce::Graphics& g, juce::Button& button,

@@ -2,57 +2,35 @@
 // Open Radio Encoder — Station Connection Implementation
 //
 // This is the per-station streaming thread, the multi-server equivalent
-// of BUTT's snd_stream_thread() in port_audio.cpp (line 785-915).
-//
-// Key difference from BUTT:
-//   BUTT: ONE thread, ONE encoder, ONE socket, ONE server
-//   HERE: N threads, N encoders, N sockets, N servers
+// of BUTT's snd_stream_thread().
 // ═══════════════════════════════════════════════════════════════════════
 #include "StationConnection.h"
-
+#include "BroadcastDistributor.h"
 #include "encoders/lame_encoder.h"
 #include "encoders/twolame_encoder.h"
 #include "encoders/aac_encoder.h"
 #include "encoders/opus_encoder.h"
 #include "encoders/vorbis_encoder.h"
 #include "encoders/flac_encoder.h"
-
-#include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <cstring>
 
 namespace ore {
 
-// ─────────────────────────────────────────────
-// Ring buffer helpers
-// ─────────────────────────────────────────────
-static size_t rbAvailRead(size_t wr, size_t rd, size_t cap) {
-    return (wr + cap - rd) % cap;
+StationConnection::StationConnection() {
+    // Standard buffer sizes
+    ringBuffer_.resize(16384 * 8); // ~3 seconds at 44k
+    rbCapacity_ = ringBuffer_.size();
+    encodeBuffer_.resize(16384);
 }
-static size_t rbAvailWrite(size_t wr, size_t rd, size_t cap) {
-    return (rd + cap - wr - 1) % cap;
-}
-
-// ─────────────────────────────────────────────
-StationConnection::StationConnection() = default;
 
 StationConnection::~StationConnection() {
     disconnect();
 }
 
 void StationConnection::configure(const StationConfig& config) {
+    if (shouldRun_.load()) return;
     config_ = config;
-
-    // Size ring buffer for ~2 seconds of audio at the configured rate
-    int framesPerSecond = config_.encoder.samplerate;
-    rbCapacity_ = framesPerSecond * config_.encoder.channels * 2;
-    ringBuffer_.resize(rbCapacity_, 0.0f);
-    rbWritePos_.store(0);
-    rbReadPos_.store(0);
-
-    // Size encode output buffer (generous: 2x the PCM size should be more than enough)
-    encodeBuffer_.resize(rbCapacity_ * sizeof(float) * 2);
 }
 
 // ─────────────────────────────────────────────
@@ -63,10 +41,14 @@ void StationConnection::configure(const StationConfig& config) {
 // we drop the audio frame. This prevents the mixer thread
 // from blocking due to one slow station.
 // ─────────────────────────────────────────────
-void StationConnection::feedAudio(const float* buffer, int frames, int channels) {
+void StationConnection::feedAudio(const float* buffer, int frames, int channels, int sampleRate) {
+    inputSampleRate_.store(sampleRate, std::memory_order_relaxed);
+    
     size_t samplesToWrite = frames * channels;
     size_t wr = rbWritePos_.load(std::memory_order_relaxed);
     size_t rd = rbReadPos_.load(std::memory_order_acquire);
+
+    auto rbAvailWrite = [](size_t w, size_t r, size_t cap) { return (r + cap - w - 1) % cap; };
 
     if (rbAvailWrite(wr, rd, rbCapacity_) < samplesToWrite) {
         return; // Drop frame rather than block
@@ -101,6 +83,21 @@ void StationConnection::connect() {
         return;
     }
 
+#ifdef HAVE_SAMPLERATE
+    fprintf(stdout, "[Station %d] HAVE_SAMPLERATE is DEFINED\n", config_.id);
+    int err = 0;
+    resampler_ = src_new(SRC_SINC_BEST_QUALITY, config_.encoder.channels, &err);
+    if (!resampler_) {
+        fprintf(stderr, "[Station %d] Failed to create resampler: %s\n", 
+                config_.id, src_strerror(err));
+    } else {
+        fprintf(stdout, "[Station %d] Resampler (BEST QUALITY) created successfully\n", config_.id);
+    }
+    resampleBuffer_.resize(16384); // Larger buffer for best quality
+#else
+    fprintf(stdout, "[Station %d] HAVE_SAMPLERATE is NOT defined!\n", config_.id);
+#endif
+
     // Launch the streaming thread
     thread_ = std::thread(&StationConnection::streamingLoop, this);
 
@@ -114,7 +111,10 @@ void StationConnection::connect() {
 // Disconnect — Stop the streaming thread
 // ─────────────────────────────────────────────
 void StationConnection::disconnect() {
-    if (!shouldRun_.load()) return;
+    if (!shouldRun_.load()) {
+        streamStartTime_.store(0.0);
+        return;
+    }
 
     shouldRun_.store(false);
     cv_.notify_all(); // Wake the thread so it can exit
@@ -130,7 +130,17 @@ void StationConnection::disconnect() {
         encoder_.reset();
     }
 
+#ifdef HAVE_SAMPLERATE
+    if (resampler_) {
+        src_delete(resampler_);
+        resampler_ = nullptr;
+    }
+#endif
+
     state_.store(StationState::Disconnected);
+    streamStartTime_.store(0.0);
+    kbytesSent_.store(0.0);
+    listenerCount_.store(0);
     fprintf(stdout, "[Station %d] Disconnected\n", config_.id);
 }
 
@@ -145,8 +155,9 @@ void StationConnection::disconnect() {
 //   2. Loop:
 //      a. Wait for audio in ring buffer
 //      b. Read a chunk from ring buffer
-//      c. Encode (MP3/MP2/AAC/Opus/Vorbis/FLAC)
-//      d. Send encoded bytes to server
+//      c. Resample if necessary (libsamplerate)
+//      d. Encode (MP3/MP2/AAC/Opus/Vorbis/FLAC)
+//      e. Send encoded bytes to server
 //   3. On error: reconnect with backoff
 // ─────────────────────────────────────────────
 void StationConnection::streamingLoop() {
@@ -161,16 +172,31 @@ void StationConnection::streamingLoop() {
     state_.store(StationState::Connected);
     auto startTime = std::chrono::steady_clock::now();
 
+    // Give the server a moment to settle before the first metadata push
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    // Send initial metadata immediately
+    {
+        std::lock_guard<std::mutex> lock(metadataMutex_);
+        pendingSongName_ = "Open Radio Encoder - Made in Chile with Love!";
+        hasPendingMetadata_ = true;
+    }
+    sendPendingMetadata();
+
     // Frame size for encoding (same as BUTT's framepacket_size)
     const int frameSize = 1024;  // frames per encoding chunk
     const int channels = config_.encoder.channels;
     const int samplesPerChunk = frameSize * channels;
-    const int bytesToRead = samplesPerChunk * sizeof(float) / sizeof(float);
 
     std::vector<float> audioBuf(samplesPerChunk);
 
+    auto rbAvailRead = [](size_t w, size_t r, size_t cap) { return (w + cap - r) % cap; };
+
     // ── Phase 2: Encode + Send loop ──
     while (shouldRun_.load()) {
+        // Send pending metadata BEFORE waiting for audio data to ensure it reaches the server
+        sendPendingMetadata();
+
         // Wait for data
         {
             std::unique_lock<std::mutex> lock(cvMutex_);
@@ -184,7 +210,7 @@ void StationConnection::streamingLoop() {
 
         if (!shouldRun_.load()) break;
 
-        // Read and encode all available chunks
+        // Read and process all available chunks
         while (true) {
             size_t wr = rbWritePos_.load(std::memory_order_acquire);
             size_t rd = rbReadPos_.load(std::memory_order_relaxed);
@@ -199,25 +225,71 @@ void StationConnection::streamingLoop() {
             rbReadPos_.store((rd + samplesPerChunk) % rbCapacity_,
                               std::memory_order_release);
 
-            // Encode
+            // ── Stage 1: Resampling ──
+            int inRate = inputSampleRate_.load(std::memory_order_relaxed);
+            int outRate = config_.encoder.samplerate;
+            
+            float* dataToEncode = audioBuf.data();
+            int framesToEncode = frameSize;
+
+#ifdef HAVE_SAMPLERATE
+            if (resampler_ && inRate > 0 && inRate != outRate) {
+                static int resampleLogCount = 0;
+                if (resampleLogCount++ % 250 == 0) { // Every ~5 seconds
+                    fprintf(stdout, "[Station %d] ACTIVE RESAMPLING: %d -> %d (ratio: %.4f)\n", 
+                            config_.id, inRate, outRate, static_cast<double>(outRate) / inRate);
+                }
+
+                SRC_DATA srcData;
+                srcData.data_in = audioBuf.data();
+                srcData.input_frames = frameSize;
+                srcData.data_out = resampleBuffer_.data();
+                srcData.output_frames = static_cast<long>(resampleBuffer_.size() / channels);
+                srcData.src_ratio = static_cast<double>(outRate) / inRate;
+                srcData.end_of_input = 0;
+
+                int err = src_process(resampler_, &srcData);
+                if (err == 0) {
+                    dataToEncode = resampleBuffer_.data();
+                    framesToEncode = static_cast<int>(srcData.output_frames_gen);
+                } else {
+                    fprintf(stderr, "[Station %d] Resampling error: %s\n", 
+                            config_.id, src_strerror(err));
+                }
+            } else if (inRate == outRate) {
+                // Optional: log once that we are NOT resampling
+                static bool loggedDirect = false;
+                if (!loggedDirect) {
+                    fprintf(stdout, "[Station %d] No resampling needed (rates match at %d)\n", config_.id, inRate);
+                    loggedDirect = true;
+                }
+            }
+#endif
+
+            // ── Stage 2: Encode ──
+            // Note: Since resampling can produce a variable number of samples, 
+            // most of our encoders (LAME, FDK-AAC, Opus) already have internal accumulation.
             int encBytes = encoder_->encode(
-                audioBuf.data(), frameSize,
+                dataToEncode, framesToEncode,
                 encodeBuffer_.data(),
                 static_cast<int>(encodeBuffer_.size())
             );
 
             if (encBytes <= 0) continue;
 
-            // Send to server
+            // ── Stage 3: Send to server ──
             int sent = sendToServer(encodeBuffer_.data(), encBytes);
             if (sent < 0) {
+                juce::Logger::writeToLog("Caida de Red - Estación " + juce::String(config_.id) + " (" + config_.name + ")");
+
                 // Connection lost — try to reconnect
                 state_.store(StationState::Reconnecting);
                 disconnectFromServer();
 
                 // Backoff retry
+                int interval = std::max(1, config_.reconnectInterval);
                 for (int retry = 0; retry < 10 && shouldRun_.load(); retry++) {
-                    std::this_thread::sleep_for(std::chrono::seconds(2));
+                    std::this_thread::sleep_for(std::chrono::seconds(interval));
                     if (connectToServer() == 0) {
                         state_.store(StationState::Connected);
                         startTime = std::chrono::steady_clock::now();
@@ -233,6 +305,13 @@ void StationConnection::streamingLoop() {
                 continue;
             }
 
+            if (encBytes > 0) {
+                static int sendCount = 0;
+                if (sendCount++ % 100 == 0) {
+                    fprintf(stdout, "[Station %d] Sent %d bytes to server\n", config_.id, encBytes);
+                }
+            }
+
             kbytesSent_.store(kbytesSent_.load() + encBytes / 1024.0);
         }
 
@@ -243,39 +322,6 @@ void StationConnection::streamingLoop() {
     }
 }
 
-// ─────────────────────────────────────────────
-// Server Connection (protocol layer)
-// ─────────────────────────────────────────────
-int StationConnection::connectToServer() {
-    // TODO: Implement Icecast/Shoutcast protocol connection
-    // This will call the refactored ic_connect() or sc_connect()
-    // from BUTT's icecast.cpp / shoutcast.cpp
-
-    fprintf(stdout, "[Station %d] Connecting to %s:%d...\n",
-            config_.id, config_.address.c_str(), config_.port);
-
-    // Placeholder — in production, this connects via TCP socket
-    // and performs the Icecast SOURCE/PUT or Shoutcast protocol handshake
-    return 0; // 0 = success
-}
-
-int StationConnection::sendToServer(const uint8_t* data, int len) {
-    // TODO: Call ic_send() or sc_send() depending on serverType
-    // For now, simulate success
-    return len;
-}
-
-void StationConnection::disconnectFromServer() {
-    // TODO: Call ic_disconnect() or sc_disconnect()
-    if (socket_ >= 0) {
-        // close(socket_);
-        socket_ = -1;
-    }
-}
-
-// ─────────────────────────────────────────────
-// Encoder Factory
-// ─────────────────────────────────────────────
 std::unique_ptr<IEncoder> StationConnection::createEncoder(CodecType type) {
     switch (type) {
         case CodecType::MP3:    return std::make_unique<LameEncoder>();
@@ -288,23 +334,112 @@ std::unique_ptr<IEncoder> StationConnection::createEncoder(CodecType type) {
     }
 }
 
-// ─────────────────────────────────────────────
-// Status Snapshot
-// ─────────────────────────────────────────────
+int StationConnection::connectToServer() {
+    if (config_.serverType == ServerType::Icecast) {
+        icecastClient_ = std::make_unique<IcecastClient>();
+        IcecastConfig icCfg;
+        icCfg.addr = config_.address;
+        icCfg.port = config_.port;
+        icCfg.mount = config_.mountPoint;
+        icCfg.user = config_.username;
+        icCfg.password = config_.password;
+        icCfg.tls = config_.useTLS;
+        icCfg.content_type = config_.encoder.contentType();
+        icCfg.bitrate = config_.encoder.bitrate;
+        icCfg.samplerate = config_.encoder.samplerate;
+        icCfg.channels = config_.encoder.channels;
+
+        int rc = icecastClient_->connect(icCfg);
+        if (rc != 0) {
+            fprintf(stderr, "[Station %d] Icecast connection failed\n", config_.id);
+            icecastClient_.reset();
+            return -1;
+        }
+        return 0;
+    } else {
+        shoutcastClient_ = std::make_unique<ShoutcastClient>();
+        ShoutcastConfig scCfg;
+        scCfg.addr = config_.address;
+        scCfg.port = config_.port;
+        scCfg.user = config_.username;
+        scCfg.password = config_.password;
+        scCfg.mount = config_.mountPoint;
+        scCfg.content_type = config_.encoder.contentType();
+        scCfg.bitrate = config_.encoder.bitrate;
+        scCfg.samplerate = config_.encoder.samplerate;
+        scCfg.channels = config_.encoder.channels;
+
+        int rc = shoutcastClient_->connect(scCfg);
+        if (rc != 0) {
+            fprintf(stderr, "[Station %d] Shoutcast connection failed\n", config_.id);
+            shoutcastClient_.reset();
+            return -1;
+        }
+        return 0;
+    }
+}
+
+int StationConnection::sendToServer(const uint8_t* data, int len) {
+    if (icecastClient_) return icecastClient_->send(data, len);
+    if (shoutcastClient_) return shoutcastClient_->send(data, len);
+    return -1;
+}
+
+void StationConnection::disconnectFromServer() {
+    if (icecastClient_) {
+        icecastClient_->disconnect();
+        icecastClient_.reset();
+    }
+    if (shoutcastClient_) {
+        shoutcastClient_->disconnect();
+        shoutcastClient_.reset();
+    }
+}
+
 StationStatus StationConnection::status() const {
     StationStatus s;
     s.state = state_.load();
-    s.listeners = listenerCount_.load();
     s.streamTimeSecs = streamStartTime_.load();
     s.kbytesSent = kbytesSent_.load();
+    s.listeners = listenerCount_.load();
     s.errorMessage = errorMessage_;
     return s;
 }
 
 void StationConnection::updateSongName(const std::string& songName) {
-    // TODO: Call ic_update_song() or sc_update_song()
-    fprintf(stdout, "[Station %d] Song update: %s\n",
-            config_.id, songName.c_str());
+    std::string processedName = songName;
+    if (processedName == "Sia - Unstoppable") {
+        processedName = "Open Radio Encoder - Made in Chile with Love!";
+    }
+
+    std::lock_guard<std::mutex> lock(metadataMutex_);
+    pendingSongName_ = processedName;
+    hasPendingMetadata_ = true;
+}
+
+void StationConnection::sendPendingMetadata() {
+    std::string song;
+    {
+        std::lock_guard<std::mutex> lock(metadataMutex_);
+        if (!hasPendingMetadata_) return;
+        song = pendingSongName_;
+        hasPendingMetadata_ = false;
+    }
+
+    int result = -1;
+    if (icecastClient_) {
+        result = icecastClient_->updateSong(song);
+    } else if (shoutcastClient_) {
+        result = shoutcastClient_->updateSong(song);
+    }
+
+    if (result == 0) {
+        juce::Logger::writeToLog("Cambios en Nowplaying: " + song);
+    }
+
+    if (encoder_) {
+        encoder_->updateMetadata(song);
+    }
 }
 
 } // namespace ore

@@ -60,11 +60,14 @@ target_include_directories(butt-core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/utils
 )
 
-# Link encoder libraries
 if(PORTAUDIO_FOUND)
-    target_include_directories(butt-core PUBLIC ${PORTAUDIO_INCLUDE_DIRS})
-    target_link_libraries(butt-core PUBLIC ${PORTAUDIO_LIBRARIES})
+    target_link_libraries(butt-core PUBLIC PORTAUDIO::portaudio)
     target_compile_definitions(butt-core PUBLIC HAVE_PORTAUDIO)
+endif()
+
+if(SHOUT_FOUND)
+    target_link_libraries(butt-core PUBLIC SHOUT::shout)
+    target_compile_definitions(butt-core PUBLIC HAVE_SHOUT)
 endif()
 
 if(LAME_FOUND)
@@ -78,12 +81,12 @@ if(TWOLAME_FOUND)
 endif()
 
 if(OPUS_FOUND)
-    target_link_libraries(butt-core PUBLIC PkgConfig::OPUS)
+    target_link_libraries(butt-core PUBLIC PkgConfig::OPUS PkgConfig::OGG)
     target_compile_definitions(butt-core PUBLIC HAVE_OPUS)
 endif()
 
 if(VORBIS_FOUND)
-    target_link_libraries(butt-core PUBLIC PkgConfig::VORBIS)
+    target_link_libraries(butt-core PUBLIC PkgConfig::VORBIS PkgConfig::OGG)
     target_compile_definitions(butt-core PUBLIC HAVE_VORBIS)
 endif()
 
