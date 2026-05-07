@@ -140,7 +140,6 @@ void ShoutcastClient::disconnect() {
     }
 #else
     isConnected_ = false;
-    shout_ = nullptr;
 #endif
 }
 

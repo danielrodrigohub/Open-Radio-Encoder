@@ -147,7 +147,6 @@ void IcecastClient::disconnect() {
     }
 #else
     isConnected_ = false;
-    shout_ = nullptr;
 #endif
 }
 
