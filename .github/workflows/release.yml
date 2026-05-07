@@ -57,7 +57,7 @@ jobs:
 
       - name: Install dependencies (vcpkg)
         run: |
-          vcpkg install portaudio lame twolame opus libvorbis libogg flac \
+          vcpkg install portaudio mp3lame twolame opus libvorbis libogg flac \
             fdk-aac libshout libsamplerate openssl --triplet x64-windows
 
       - name: Configure CMake
@@ -102,7 +102,7 @@ jobs:
             libfreetype-dev libfontconfig-dev \
             libcurl4-openssl-dev libasound2-dev \
             libx11-dev libxcomposite-dev libxext-dev libxrandr-dev \
-            libglu1-mesa-dev libxcursor-dev
+            libxinerama-dev libglu1-mesa-dev libxcursor-dev
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
