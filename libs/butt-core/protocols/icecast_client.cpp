@@ -141,13 +141,11 @@ void IcecastClient::disconnect() {
     if (isConnected_ && shout_) {
         shout_close(shout_);
         shout_free(shout_);
-        shout_ = nullptr;
-        isConnected_ = false;
         std::cout << "[IcecastClient] Disconnected" << std::endl;
     }
-#else
-    isConnected_ = false;
 #endif
+    shout_ = nullptr;
+    isConnected_ = false;
 }
 
 } // namespace ore
