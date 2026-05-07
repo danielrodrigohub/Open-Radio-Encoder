@@ -38,7 +38,7 @@ int OpusEncoder_::init(const EncoderConfig& config) {
 #endif
 }
 
- #ifdef HAVE_OPUS
+#ifdef HAVE_OPUS
 int OpusEncoder_::writePage(uint8_t* enc_out, int max_out_bytes, bool flush) {
     int totalBytes = 0;
     ogg_page og;
@@ -54,7 +54,7 @@ int OpusEncoder_::writePage(uint8_t* enc_out, int max_out_bytes, bool flush) {
     }
     return totalBytes;
 }
- #endif
+#endif
 
 int OpusEncoder_::encode(const float* pcm_in, int num_samples,
                           uint8_t* enc_out, int max_out_bytes) {
