@@ -47,12 +47,15 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Setup vcpkg
+      - name: Install dependencies (vcpkg)
         run: |
           vcpkg install portaudio lame twolame opus libvorbis libogg flac \
             fdk-aac libshout libsamplerate openssl --triplet x64-windows
@@ -60,22 +63,24 @@ jobs:
       - name: Configure CMake
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$Env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake"
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
 
       - name: Build
-        run: cmake --build build --config Release -j $env:NUMBER_OF_PROCESSORS
+        run: cmake --build build --config Release -j$(nproc)
 
       - name: Package
         run: |
-          mkdir release
-          Compress-Archive -Path "build/OpenRadioEncoder_artefacts/Release/OpenRadioEncoder.exe" `
-            -DestinationPath "release/OpenRadioEncoder-Windows.zip"
+          mkdir -p release
+          if [ -f "build/OpenRadioEncoder_artefacts/Release/OpenRadioEncoder.exe" ]; then
+            cp "build/OpenRadioEncoder_artefacts/Release/OpenRadioEncoder.exe" release/
+          fi
+          cd release && zip -r ../OpenRadioEncoder-Windows.zip . && cd ..
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: release/OpenRadioEncoder-Windows.zip
+          path: OpenRadioEncoder-Windows.zip
 
   build-ubuntu:
     runs-on: ubuntu-24.04
