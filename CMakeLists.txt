@@ -170,6 +170,65 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/JUCE/CMakeLists.txt")
         juce::juce_gui_extra
         juce::juce_opengl
     )
+    # ─────────────────────────────────────────────
+    # Installation & Packaging
+    # ─────────────────────────────────────────────
+    include(GNUInstallDirs)
+
+    if(WIN32)
+        install(TARGETS OpenRadioEncoder
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        )
+
+        install(TARGETS OpenRadioEncoder
+            RUNTIME_DEPENDENCIES
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+            PRE_EXCLUDE_REGEXES "api-ms-.*" "ext-ms-.*"
+            POST_EXCLUDE_REGEXES ".*system32.*" ".*\\.pdb$"
+        )
+
+        install(FILES LICENSE DESTINATION . OPTIONAL)
+
+        set(CPACK_GENERATOR "NSIS")
+        set(CPACK_PACKAGE_FILE_NAME "OpenRadioEncoder-${PROJECT_VERSION}-win64")
+        set(CPACK_NSIS_DISPLAY_NAME "Open Radio Encoder")
+        set(CPACK_NSIS_PACKAGE_NAME "Open Radio Encoder ${PROJECT_VERSION}")
+        set(CPACK_NSIS_INSTALL_ROOT "$PROGRAMFILES64")
+        set(CPACK_NSIS_MUI_ICON "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/appicon.png")
+        set(CPACK_NSIS_MUI_UNICON "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/appicon.png")
+        set(CPACK_NSIS_CREATE_ICONS_EXTRA "
+            CreateShortCut '$SMPROGRAMS\\\\$STARTMENU_FOLDER\\\\Open Radio Encoder.lnk' '$INSTDIR\\\\bin\\\\OpenRadioEncoder.exe'
+            CreateShortCut '$DESKTOP\\\\Open Radio Encoder.lnk' '$INSTDIR\\\\bin\\\\OpenRadioEncoder.exe'
+        ")
+        set(CPACK_NSIS_DELETE_ICONS_EXTRA "
+            Delete '$SMPROGRAMS\\\\$START_MENU\\\\Open Radio Encoder.lnk'
+            Delete '$DESKTOP\\\\Open Radio Encoder.lnk'
+        ")
+        set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/danielrodrigohub/Open-Radio-Encoder")
+        set(CPACK_NSIS_HELP_LINK "https://github.com/danielrodrigohub/Open-Radio-Encoder/issues")
+        set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+        set(CPACK_NSIS_MODIFY_PATH OFF)
+        set(CPACK_NSIS_MENU_LINKS
+            "https://github.com/danielrodrigohub/Open-Radio-Encoder" "Open Radio Encoder on GitHub"
+        )
+    elseif(APPLE)
+        install(TARGETS OpenRadioEncoder BUNDLE DESTINATION .)
+        set(CPACK_GENERATOR "DragNDrop")
+        set(CPACK_DMG_VOLUME_NAME "Open Radio Encoder")
+    else()
+        install(TARGETS OpenRadioEncoder RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+        set(CPACK_GENERATOR "TGZ")
+    endif()
+
+    set(CPACK_PACKAGE_NAME "OpenRadioEncoder")
+    set(CPACK_PACKAGE_VENDOR "OpenRadioProject")
+    set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Multi-station internet radio streaming encoder")
+    set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/danielrodrigohub/Open-Radio-Encoder")
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+    set(CPACK_PACKAGE_INSTALL_DIRECTORY "Open Radio Encoder")
+
+    include(CPack)
 else()
     # Fallback: Build without JUCE for CI/testing
     message(WARNING "Building without JUCE - engine library only")

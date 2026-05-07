@@ -79,23 +79,16 @@ jobs:
       - name: Build
         run: cmake --build build --config Release -j$(nproc) 2>&1 | tail -50
 
-      - name: Package
+      - name: Package (NSIS Installer)
         run: |
-          EXE="build/OpenRadioEncoder_artefacts/Release/OpenRadioEncoder.exe"
-          if [ -f "$EXE" ]; then
-            mkdir -p release && cp "$EXE" release/ && cd release && \
-              7z a ../OpenRadioEncoder-Windows.zip . && cd ..
-          else
-            echo "Binary not found at $EXE"
-            find build -name "OpenRadio*" -type f 2>/dev/null || echo "No binaries found"
-            exit 1
-          fi
+          cmake --install build --config Release --prefix install
+          cpack -C Release --config build/CPackConfig.cmake -G NSIS
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: OpenRadioEncoder-Windows.zip
+          path: OpenRadioEncoder-*-win64.exe
 
   build-ubuntu:
     runs-on: ubuntu-24.04
@@ -168,7 +161,7 @@ jobs:
             | Platform | File |
             |----------|------|
             | macOS (x86_64 + arm64) | `OpenRadioEncoder-macOS.dmg` |
-            | Windows (x64) | `OpenRadioEncoder-Windows.zip` |
+            | Windows (x64) | `OpenRadioEncoder-*-win64.exe` (Installer) |
             | Ubuntu / Linux (x64) | `OpenRadioEncoder-ubuntu.tar.gz` |
 
             ### CLI Flags
@@ -189,5 +182,6 @@ jobs:
             *.dmg
             *.zip
             *.tar.gz
+            *.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
