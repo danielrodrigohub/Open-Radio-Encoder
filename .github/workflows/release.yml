@@ -33,14 +33,15 @@ jobs:
 
       - name: Package DMG
         run: |
-          APP="build/OpenRadioEncoder_artefacts/Release/OpenRadioEncoder.app"
-          if [ -d "$APP" ]; then
+          APP=$(find build -name "*.app" -type d -maxdepth 4 2>/dev/null | head -1)
+          if [ -n "$APP" ] && [ -d "$APP" ]; then
+            echo "Found app: $APP"
             hdiutil create -volname "OpenRadioEncoder" \
               -srcfolder "$APP" -ov -format UDZO OpenRadioEncoder-macOS.dmg
           else
-            echo "App bundle not found at $APP"
-            find build -name "*.app" -type d 2>/dev/null || echo "No .app bundles found"
-            find build -name "OpenRadio*" -type f 2>/dev/null || echo "No OpenRadio binaries found"
+            echo "No .app bundle found"
+            find build -name "*.app" -type d 2>/dev/null || echo "No app bundles"
+            find build -name "Open*Radio*" -type f 2>/dev/null || echo "No binaries"
             exit 1
           fi
 
@@ -60,9 +61,13 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install pkg-config (choco)
+        shell: pwsh
+        run: choco install pkgconfiglite -y --no-progress
+
       - name: Install dependencies (vcpkg)
         run: |
-          vcpkg install pkgconf portaudio mp3lame twolame opus libvorbis libogg flac \
+          vcpkg install portaudio mp3lame twolame opus libvorbis libogg flac \
             libshout libsamplerate openssl --triplet x64-windows || true
           vcpkg install fdk-aac --triplet x64-windows || true
 
