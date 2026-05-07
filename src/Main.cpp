@@ -41,7 +41,10 @@ public:
     bool moreThanOneInstanceAllowed() override           { return false; }
 
     void initialise(const juce::String& commandLine) override {
-        juce::ArgumentList args(commandLine);
+        juce::StringArray argTokens;
+        argTokens.addTokens(commandLine, true);
+        argTokens.removeEmptyStrings();
+        juce::ArgumentList args(getApplicationName(), argTokens);
 
         if (args.containsOption("--help") || args.containsOption("-h")) {
             printHelp();
